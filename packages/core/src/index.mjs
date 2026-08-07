@@ -63,3 +63,4 @@ export {WELL_KNOWN_OBSERVATION_TYPES,evaluateAssertion,executeObservations,MockS
 export {MemoryStateStore,FileStateStore,MemoryDefinitionStore,FileDefinitionStore,MemoryRuntimeMetadataStore,FileRuntimeMetadataStore} from './stores.mjs';
 export {applyExternalChange,observeExternalResource,detectProviderDrift,evaluateSemanticObservation,proposeFindingResponses,runProviderControlLoop} from './provider-control-loop.mjs';
 export {OPERATION_REGISTRY,STEWARD_ACTOR_ID,discoverOperations,DeterministicIntentResolver,stewardIdentity,organisationalLearning} from './control-plane.mjs';
+export {CORE_OPERATION_CATALOG,compileOmniform,operationToolDefinitions,operationIndex,validateSchema} from './compiler.mjs';

@@ -9,6 +9,7 @@ OmniSeed owns headless execution of Omniform. Read the README, relevant ADRs, an
 - Deterministic logic handles validation, hashes, graphs, diffs, permissions, approvals, and bookkeeping; AI cannot bypass it.
 - No frontend business logic or OmniSeed OS dependency.
 - Major capabilities need structured machine surfaces usable by humans, software/AI, and future embodied machines.
+- Portable operation semantics come from the materialized Omniform catalogue. Do not add an executable handler without an Omniform operation or duplicate its schemas, permissions, mutation, approval, risk, or interface metadata downstream.
 - Keep the runtime operations boundary stable; clients use transports rather than importing internal core modules.
 - Keep founding proposals non-canonical until authorized commit; never persist proposal workflow fields into Omniform.
 - Keep definition, portable state, evidence, and runtime metadata in separate stores and snapshots free of secrets.

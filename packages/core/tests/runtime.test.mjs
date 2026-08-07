@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import {OmniSeedRuntime,RUNTIME_OPERATIONS} from '../src/runtime.mjs';
 const read=name=>JSON.parse(fs.readFileSync(new URL(`../../../examples/minimal/${name}`,import.meta.url)));
-test('runtime exposes the required domain operations',()=>assert.deepEqual(RUNTIME_OPERATIONS,['getRuntimeStatus','discoverOperations','resolveIntent','getCompany','listCapabilities','getCapability','listGaps','getCurrentPlan','generatePlan','cancelPlan','getState','getInfrastructure','listActivity','listObservations','listFindings','applyPlan']));
+test('runtime exposes the required domain operations',()=>assert.deepEqual(RUNTIME_OPERATIONS,['getRuntimeStatus','getCapabilityRegistry','listOperations','describeOperation','getAgentTools','executeOperation','discoverOperations','resolveIntent','getCompany','listCapabilities','getCapability','listGaps','getCurrentPlan','generatePlan','cancelPlan','getState','getInfrastructure','listActivity','listObservations','listFindings','applyPlan']));
 test('live lifecycle is missing, planned, approved, applied, realised, and event-backed',async()=>{
  let tick=0;const runtime=new OmniSeedRuntime({definition:read('company.json'),deployment:read('deployment-state.json'),clock:()=>`2026-01-01T00:00:0${tick++}.000Z`});
  assert.equal((await runtime.invoke('getCapability',{id:'customer_support'})).state,'missing');

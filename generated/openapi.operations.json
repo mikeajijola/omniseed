@@ -1,0 +1,229 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "OmniSeed operations",
+    "version": "0.1.0"
+  },
+  "x-omniform-source": {
+    "repository": "omniform",
+    "path": "contracts/core.operations.json",
+    "catalogVersion": "0.1.0"
+  },
+  "paths": {
+    "/operations/get_capability": {
+      "get": {
+        "summary": "Describe get_capability",
+        "responses": {
+          "200": {
+            "description": "Omniform operation metadata"
+          }
+        }
+      },
+      "post": {
+        "summary": "Get the calculated state, realisations, gaps, and evidence for one capability.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9_-]*$"
+                      }
+                    }
+                  },
+                  "authorization": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Validated operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/operations/generate_plan": {
+      "get": {
+        "summary": "Describe generate_plan",
+        "responses": {
+          "200": {
+            "description": "Omniform operation metadata"
+          }
+        }
+      },
+      "post": {
+        "summary": "Generate a proposed organisational change plan without authorizing execution.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "definition": {
+                        "type": "object"
+                      }
+                    }
+                  },
+                  "authorization": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Validated operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "status",
+                    "changes"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "changes": {
+                      "type": "array"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/operations/apply_plan": {
+      "get": {
+        "summary": "Describe apply_plan",
+        "responses": {
+          "200": {
+            "description": "Omniform operation metadata"
+          }
+        }
+      },
+      "post": {
+        "summary": "Apply explicitly approved changes from the current plan through governed runtime and provider handlers.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "planId",
+                      "approvedChangeIds",
+                      "authorization"
+                    ],
+                    "properties": {
+                      "planId": {
+                        "type": "string"
+                      },
+                      "approvedChangeIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "authorization": {
+                        "type": "object",
+                        "required": [
+                          "actorId",
+                          "permissions"
+                        ],
+                        "properties": {
+                          "actorId": {
+                            "type": "string"
+                          },
+                          "permissions": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "authorization": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Validated operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "state",
+                    "results",
+                    "summary"
+                  ],
+                  "properties": {
+                    "state": {
+                      "type": "object"
+                    },
+                    "results": {
+                      "type": "array"
+                    },
+                    "summary": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

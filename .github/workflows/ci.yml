@@ -9,6 +9,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: {node-version: 22, cache: npm}
       - run: npm install
+      - run: git clone --depth 1 https://github.com/mikeajijola/omniform.git ../omniform
+      - run: npm run contracts:check
       - run: npm run lint
       - run: npm test
       - run: npm run test:integration
