@@ -10,6 +10,9 @@ export function validateDefinition(document) {
   if (!company?.id || !company?.name || !company?.purpose) errors.push({path:'/company',message:'id, name, and purpose are required'});
   if (!Array.isArray(company?.capabilities)) errors.push({path:'/company/capabilities',message:'must be an array'});
   for (const capability of company?.capabilities || []) if ('status' in capability) errors.push({path:`/company/capabilities/${capability.id}/status`,message:'calculated state cannot appear in desired configuration'});
+  for (const observation of company?.observations || []) {
+    if (!observation.id || !observation.type || !observation.capability || !observation.condition || !Object.keys(observation.condition).length) errors.push({path:`/company/observations/${observation.id||'unknown'}`,message:'id, extensible type, capability, and condition are required'});
+  }
   return {valid:errors.length === 0,errors};
 }
 
@@ -55,4 +58,5 @@ export function applyPlan(plan, deployment={version:0,resources:{}}, approved=[]
 }
 
 export function event(type,data,at='1970-01-01T00:00:00.000Z') { return {specversion:'1.0',type,source:'omniseed',time:at,data}; }
-export const EVENT_TYPES=['definition.loaded','definition.validated','plan.created','plan.approved','apply.started','resource.created','resource.updated','resource.failed','state.updated','drift.detected','capability.changed','semantic.finding.created'];
+export const EVENT_TYPES=['definition.loaded','definition.validated','plan.created','plan.approved','plan.rejected','apply.started','resource.created','resource.updated','resource.failed','state.updated','drift.detected','capability.changed','semantic.finding.created'];
+export {WELL_KNOWN_OBSERVATION_TYPES,evaluateAssertion,executeObservations,MockSemanticEvaluator} from './observations.mjs';
