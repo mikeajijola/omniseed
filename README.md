@@ -12,7 +12,7 @@ It is for runtime contributors, provider authors, automation builders, and archi
 
 ## Try it
 
-Requires Node.js 20+; no cloud account, Docker, database, or AI key is needed.
+Requires Node.js 22.13+; no cloud account, Docker, database service, or AI key is needed.
 
 ```sh
 npm test
