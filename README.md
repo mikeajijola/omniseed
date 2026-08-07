@@ -1,5 +1,7 @@
 # OmniSeed
 
+**Define once in Omniform. Execute through OmniSeed. Experience through any interface.**
+
 **OmniSeed is the open headless reference engine for Omniform.** It validates definitions, calculates capability state, plans, applies approved changes, observes evidence, detects drift, and emits structured events.
 
 > **Licensing blocker:** this public repository has no explicit license yet. The source is publicly readable but not licensed for reuse as open source pending a maintainer decision.
