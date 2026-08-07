@@ -1,0 +1,12 @@
+name: Runtime bug
+description: Report validation, planning, apply, provider, event, or CLI behaviour
+labels: ["type:bug"]
+body:
+  - type: textarea
+    id: expected
+    attributes: {label: Expected and actual behaviour}
+    validations: {required: true}
+  - type: textarea
+    id: reproduce
+    attributes: {label: Minimal reproduction and evidence}
+    validations: {required: true}
