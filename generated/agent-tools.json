@@ -153,6 +153,129 @@
           "apply_plan"
         ]
       }
+    },
+    {
+      "name": "resolve_capability",
+      "description": "Calculate coverage, gaps, and candidate realisations for a required company capability.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "capabilityId"
+        ],
+        "properties": {
+          "capabilityId": {
+            "type": "string"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object"
+      },
+      "metadata": {
+        "version": "0.1.0",
+        "mutation": false,
+        "approval": {
+          "mode": "none"
+        },
+        "risk": "none",
+        "permissions": [
+          "plan_company"
+        ]
+      }
+    },
+    {
+      "name": "get_capability_realisation",
+      "description": "Inspect selected resources and requirement coverage for a company capability.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "capabilityId"
+        ],
+        "properties": {
+          "capabilityId": {
+            "type": "string"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": [
+          "object",
+          "null"
+        ]
+      },
+      "metadata": {
+        "version": "0.1.0",
+        "mutation": false,
+        "approval": {
+          "mode": "none"
+        },
+        "risk": "none",
+        "permissions": [
+          "read_company"
+        ]
+      }
+    },
+    {
+      "name": "list_attention",
+      "description": "List gaps, blocked work, approvals, findings, drift, and stale evidence requiring attention.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "array"
+      },
+      "metadata": {
+        "version": "0.1.0",
+        "mutation": false,
+        "approval": {
+          "mode": "none"
+        },
+        "risk": "none",
+        "permissions": [
+          "read_company"
+        ]
+      }
+    },
+    {
+      "name": "accept_capability_gap",
+      "description": "Record an explicit governed decision to accept a currently unmet capability requirement.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "capabilityId",
+          "reason",
+          "authorization"
+        ],
+        "properties": {
+          "capabilityId": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "authorization": {
+            "type": "object"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object"
+      },
+      "metadata": {
+        "version": "0.1.0",
+        "mutation": true,
+        "approval": {
+          "mode": "required"
+        },
+        "risk": "medium",
+        "permissions": [
+          "govern_company"
+        ]
+      }
     }
   ]
 }

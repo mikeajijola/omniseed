@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 
-export const CAPABILITY_STATES = ['missing','planned','partial','realised','degraded','retired','unknown'];
+import {evaluateCapabilityCoverage} from './realisations.mjs';
+export const CAPABILITY_STATES = ['missing','planned','partial','realised','degraded','blocked','deferred','gap_accepted','retryable','retired','unknown'];
 export const ACTIONS = ['create','update','remove','replace','noop'];
 
 export function validateDefinition(document) {
@@ -27,8 +28,10 @@ export function evaluateCapabilities(definition, deployment={resources:{}}, obse
     const active = candidates.filter(resource => deployment.resources?.[resource.id]?.status === 'active');
     const degraded = active.some(resource => observations.resources?.[resource.id]?.health === 'degraded');
     const pending = candidates.some(resource => ['planned','pending'].includes(deployment.resources?.[resource.id]?.status));
-    const state = degraded ? 'degraded' : active.length === candidates.length && active.length ? 'realised' : active.length ? 'partial' : pending ? 'planned' : 'missing';
-    return [capability.id,{id:capability.id,name:capability.name,state,required:capability.required,resources:candidates.map(r=>r.id),evidence:observations.capabilities?.[capability.id]?.evidence || []}];
+    const coverage=evaluateCapabilityCoverage(capability,resources,deployment,observations);
+    const legacyState=degraded ? 'degraded' : active.length === candidates.length && active.length ? 'realised' : active.length ? 'partial' : pending ? 'planned' : 'missing';
+    const state=degraded?'degraded':coverage.state||legacyState;
+    return [capability.id,{id:capability.id,name:capability.name,purpose:capability.purpose,state,required:capability.required,resources:candidates.map(r=>r.id),evidence:observations.capabilities?.[capability.id]?.evidence || [],requirements:coverage.requirements,coverage:coverage.coverage,missingRequirements:coverage.missingRequirements,humanDependencies:coverage.humanDependencies,autonomy:coverage.autonomy}];
   }));
 }
 
@@ -64,3 +67,4 @@ export {MemoryStateStore,FileStateStore,MemoryDefinitionStore,FileDefinitionStor
 export {applyExternalChange,observeExternalResource,detectProviderDrift,evaluateSemanticObservation,proposeFindingResponses,runProviderControlLoop} from './provider-control-loop.mjs';
 export {OPERATION_REGISTRY,STEWARD_ACTOR_ID,discoverOperations,DeterministicIntentResolver,stewardIdentity,organisationalLearning} from './control-plane.mjs';
 export {CORE_OPERATION_CATALOG,compileOmniform,operationToolDefinitions,operationIndex,validateSchema} from './compiler.mjs';
+export {CapabilityResolver,evaluateCapabilityCoverage,realisationAttempt,attentionItems} from './realisations.mjs';
