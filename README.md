@@ -1,0 +1,27 @@
+# OmniSeed
+
+**OmniSeed is the open headless reference engine for Omniform.** It validates definitions, calculates capability state, plans, applies approved changes, observes evidence, detects drift, and emits structured events.
+
+`Omniform (meaning) → OmniSeed (execution) → OmniSeed OS (interaction)`
+
+It is for runtime contributors, provider authors, automation builders, and architects who need deterministic Company-as-Code execution without a frontend or external account.
+
+## Try it
+
+Requires Node.js 20+; no cloud account, Docker, database, or AI key is needed.
+
+```sh
+npm test
+npm run omniseed -- validate examples/minimal --json
+npm run omniseed -- plan examples/minimal --json
+```
+
+The [getting-started guide](docs/getting-started/local-runtime.md) covers plan and apply. Major commands produce structured output with `--json`.
+
+## Ecosystem and contribution map
+
+- [Omniform](https://github.com/mikeajijola/omniform): change portable semantics or reusable capability/monitor knowledge there.
+- **OmniSeed**: change validation, graph, calculated state, planning/apply, provider contracts, events, or CLI here.
+- [OmniSeed OS](https://github.com/mikeajijola/omniseedos): change operating experience, accessibility, or actor interfaces there.
+
+External integrations implement [`@omniseed/provider-sdk`](packages/provider-sdk/src/index.mjs); vendor logic stays outside core. See [CONTRIBUTING](CONTRIBUTING.md), [docs](docs/index.md), and [architecture decisions](docs/architecture/decisions).
