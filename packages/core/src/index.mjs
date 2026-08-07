@@ -63,7 +63,7 @@ export function applyPlan(plan, deployment={version:0,resources:{}}, approved=[]
 export function event(type,data,at='1970-01-01T00:00:00.000Z') { return {specversion:'1.0',type,source:'omniseed',time:at,data}; }
 export const EVENT_TYPES=['definition.loaded','definition.validated','plan.created','plan.approved','plan.rejected','apply.started','resource.created','resource.updated','resource.failed','provider.observed','state.updated','drift.detected','capability.changed','semantic.finding.created','response.proposed'];
 export {WELL_KNOWN_OBSERVATION_TYPES,evaluateAssertion,executeObservations,MockSemanticEvaluator} from './observations.mjs';
-export {MemoryStateStore,FileStateStore,MemoryDefinitionStore,FileDefinitionStore,MemoryRuntimeMetadataStore,FileRuntimeMetadataStore} from './stores.mjs';
+export {MemoryStateStore,FileStateStore,MemoryDefinitionStore,FileDefinitionStore,MemoryRuntimeMetadataStore,FileRuntimeMetadataStore,HostedKeyValueClient,HostedDefinitionStore,HostedStateStore,HostedRuntimeMetadataStore} from './stores.mjs';
 export {applyExternalChange,observeExternalResource,detectProviderDrift,evaluateSemanticObservation,proposeFindingResponses,runProviderControlLoop} from './provider-control-loop.mjs';
 export {OPERATION_REGISTRY,STEWARD_ACTOR_ID,discoverOperations,DeterministicIntentResolver,stewardIdentity,organisationalLearning} from './control-plane.mjs';
 export {CORE_OPERATION_CATALOG,compileOmniform,operationToolDefinitions,operationIndex,validateSchema} from './compiler.mjs';

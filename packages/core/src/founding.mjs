@@ -19,4 +19,6 @@ export class FoundingService {
   explainFoundingItem({sessionId,section,itemId}){const session=this.require(sessionId),candidate=session.proposal?.[section]?.find(item=>item.id===itemId);if(!candidate)throw new Error('Draft item not found');return {id:candidate.id,name:candidate.name,rationale:candidate.rationale,confidence:candidate.confidence,source:candidate.source}}
   validateFoundingDraft({sessionId}){const session=this.require(sessionId),proposalValidation=validateFoundingProposal(session.proposal);if(!proposalValidation.valid)return proposalValidation;const definition=proposalToOmniform(session.proposal),definitionValidation=validateDefinition(definition),errors=[...definitionValidation.errors];if(!definition.company.capabilities.length)errors.push({path:'/company/capabilities',message:'accept or add at least one capability before founding'});return {valid:errors.length===0,errors,definition}}
   require(id){const session=this.sessions.get(id);if(!session)throw new Error('Founding session not found');return session}
+  exportSessions(){return [...this.sessions.values()].map(session=>structuredClone(session))}
+  importSessions(sessions=[]){this.sessions=new Map(sessions.map(session=>[session.id,structuredClone(session)]));return this.sessions.size}
 }

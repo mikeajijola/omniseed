@@ -2,6 +2,8 @@
 
 The [capability-realisation loop](concepts/capability-realisation-loop.md) explains how requirements, resource offerings, policy, providers, and evidence turn declared intent into calculated company ability.
 
+The [hosted runtime](concepts/hosted-runtime.md) documents durable stores, public read-only access, and the replaceable Vercel Functions adapter.
+
 - **Founder/operator:** OmniSeed OS is the friendly surface; use this runtime guide to understand what it executes.
 - **Developer or AI/integration builder:** start with the [local runtime](getting-started/local-runtime.md), [runtime operations](reference/runtime-operations.md), [observations](concepts/observations.md), and provider SDK.
 - **Architect:** read [runtime boundaries](concepts/runtime-boundaries.md), [generative Omniform contracts](concepts/generative-omniform.md), and ADRs.

@@ -2,7 +2,7 @@
   "omniform":"0.1",
   "catalogVersion":"0.1.0",
   "capabilities":[
-    {"id":"company_inspection","name":"Company Inspection","description":"Understand declared and calculated organisational state.","operations":["get_capability"]},
+    {"id":"company_inspection","name":"Company Inspection","description":"Understand declared and calculated organisational state.","operations":["get_capability","get_resource","list_attention"]},
     {"id":"company_planning","name":"Company Planning","description":"Propose governed changes to organisational intent and realisation.","operations":["generate_plan"]},
     {"id":"company_governance","name":"Company Governance","description":"Authorize and execute approved organisational change.","operations":["apply_plan","accept_capability_gap"]},
     {"id":"capability_realisation","name":"Capability Realisation","description":"Resolve required capability coverage into governed realisation options.","operations":["resolve_capability","get_capability_realisation","list_attention"]}
@@ -14,6 +14,13 @@
       "output":{"type":["object","null"]},"mutation":false,"permissions":["read_company"],"approval":{"mode":"none"},"risk":"none","reversible":true,
       "interfaces":["human","agent","cli","api","machine"],"evidenceProduced":[],"eventsEmitted":[],"applicableResourceTypes":[],
       "presentation":{"label":"Inspect capability","category":"company","importance":"primary"}
+    },
+    {
+      "id":"get_resource","version":"0.1.0","name":"Get resource","description":"Inspect a resource, its capability offerings, provider, health, permissions, and company-capability relationships.","capability":"company_inspection",
+      "input":{"type":"object","additionalProperties":false,"required":["id"],"properties":{"id":{"type":"string","pattern":"^[a-z][a-z0-9_-]*$"}}},
+      "output":{"type":["object","null"]},"mutation":false,"permissions":["read_company"],"approval":{"mode":"none"},"risk":"none","reversible":true,
+      "interfaces":["human","agent","cli","api","machine"],"evidenceProduced":[],"eventsEmitted":[],"applicableResourceTypes":["agent","person","team","workflow","connector","system","partner","entity","machine"],
+      "presentation":{"label":"Inspect resource","category":"realisations","importance":"primary"}
     },
     {
       "id":"generate_plan","version":"0.1.0","name":"Generate plan","description":"Generate a proposed organisational change plan without authorizing execution.","capability":"company_planning",

@@ -66,6 +66,62 @@
         }
       }
     },
+    "/operations/get_resource": {
+      "get": {
+        "summary": "Describe get_resource",
+        "responses": {
+          "200": {
+            "description": "Omniform operation metadata"
+          }
+        }
+      },
+      "post": {
+        "summary": "Inspect a resource, its capability offerings, provider, health, permissions, and company-capability relationships.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9_-]*$"
+                      }
+                    }
+                  },
+                  "authorization": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Validated operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/operations/generate_plan": {
       "get": {
         "summary": "Describe generate_plan",

@@ -23,6 +23,23 @@
       }
     },
     {
+      "operation": "get_resource",
+      "alias": null,
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$"
+          }
+        }
+      }
+    },
+    {
       "operation": "generate_plan",
       "alias": "plan",
       "inputSchema": {
