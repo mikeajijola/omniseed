@@ -1,16 +1,18 @@
-# Persistent company instances
+# One runtime, one database
 
-The default local runtime uses replaceable `FileDefinitionStore`, `FileStateStore`, and `FileRuntimeMetadataStore` implementations. Tests and embedded callers may use the corresponding memory stores.
+SQLite is OmniSeed's preferred durable local store. The normal runtime writes one standard database file:
 
 ```text
-.omniseed/companies/<company-id>/
-├── company.json
-├── state/
-│   ├── current.json
-│   └── history/<version>.json
-└── runtime/
-    ├── applies/
-    └── founding/
+.omniseed/
+└── omniseed.db
 ```
 
-Definition, portable state, evidence, and operational metadata remain separate. Writes are atomic. Every successful apply saves a numbered state snapshot; runtime metadata records which plan, actor, and approved changes produced it. Portable-state validation rejects secret-like fields.
+`SQLiteDefinitionStore`, `SQLiteStateStore`, and `SQLiteRuntimeMetadataStore` share one relational repository while preserving semantic boundaries. Desired definitions, versioned portable state, observed evidence, and operational metadata occupy separate tables. Consolidating storage does not make these concepts interchangeable.
+
+The schema contains companies, definition versions, capabilities, resources, state versions, plans and changes, applies, events, observations, findings, evidence, founding sessions, schedules, realisation attempts, and validated organisational learning. State snapshots and append-only activity answer what changed, which plan caused it, and who approved it without introducing event sourcing.
+
+Portable-state validation rejects secret-like fields. Provider credentials remain runtime configuration and never enter definitions, state history, events, or browser responses.
+
+Memory and file stores remain available. Import an older file-backed workspace with `npm run migrate:sqlite -- .omniseed/companies .omniseed/omniseed.db`.
+
+The store interfaces remain replaceable. Physical consolidation is an implementation choice; semantic separation is an invariant.

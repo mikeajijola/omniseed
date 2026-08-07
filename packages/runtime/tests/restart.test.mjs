@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
+import {createSQLiteStores} from '../../core/src/sqlite-stores.mjs';
 
 test('successful apply survives a runtime process restart',async()=>{
   const data=await fs.mkdtemp(path.join(os.tmpdir(),'omniseed-restart-')),port=18877,url=`http://127.0.0.1:${port}`;
@@ -18,7 +19,10 @@ test('successful apply survives a runtime process restart',async()=>{
     await stop(child);child=undefined;
     child=await start(data,port);
     assert.equal((await invoke(url,'getCapability',{id:'customer_support'})).state,'realised');
-    assert.equal(JSON.parse(await fs.readFile(path.join(data,'acme/state/history/2.json'),'utf8')).resources.support_agent.status,'active');
+    const stores=await createSQLiteStores({file:path.join(data,'omniseed.db')});
+    assert.equal((await stores.stateStore.loadVersion('acme',2)).resources.support_agent.status,'active');
+    assert.ok((await stores.metadataStore.list('acme','events')).some(event=>event.type==='capability.changed'));
+    await stores.repository.close();
   } finally {
     if(child)await stop(child);
     await fs.rm(data,{recursive:true,force:true});

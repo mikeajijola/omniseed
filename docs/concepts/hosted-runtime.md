@@ -1,11 +1,11 @@
 # Hosted runtime
 
-The hosted runtime exposes the same `/operations/{operation}` boundary as local OmniSeed. Vercel Functions are a replaceable host; they are not the state store or the source of company truth.
+The hosted runtime exposes the same `/operations/{operation}` boundary as local OmniSeed. Vercel Functions are a replaceable host; they are not the state store or source of company truth.
 
-`HostedDefinitionStore`, `HostedStateStore`, and `HostedRuntimeMetadataStore` use a small key-value client contract. The initial adapter targets the Redis-compatible REST variables supplied by a Vercel Marketplace store. Definitions, current portable state, version history, events, plans, apply metadata, and founding-session snapshots use separate keys.
+Hosted mode uses the same relational schema through a SQLite-compatible remote driver. The current fetch-only adapter accepts `OMNISEED_DATABASE_URL` and `OMNISEED_DATABASE_AUTH_TOKEN`; `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` are deployment aliases. These select an implementation—Turso and Vercel are not domain concepts.
 
-Anonymous requests receive `read_company` authority only. Mutations—including plan generation, apply, accepted-gap decisions, and founding—require an owner credential held server-side or in an HTTP-only session cookie. Provider credentials never enter portable state or browser responses.
+Local mode uses a standard SQLite file and requires no account, daemon, Docker, Redis, or network connection. Anonymous hosted requests receive `read_company` authority only. Mutations require an owner credential held server-side or in an HTTP-only session cookie. Provider and database credentials never enter portable state or browser responses.
 
-The hosted seed labels `local` and `mock-google` resources as simulated. A real Google Workspace connection must use a real provider identity and observed connection evidence.
+Schedules remain Omniform intent. The self-contained runtime runs due interval and one-shot schedules through the normal operation boundary. A hosted trigger such as Vercel Cron may invoke that scheduler later without changing Schedule semantics.
 
-Schedules remain Omniform intent. A future scheduler adapter may use Vercel Cron or another provider, but schedule execution is not coupled to the host.
+The previous hosted key-value adapter remains available only for compatibility. It is not the canonical persistence model.

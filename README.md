@@ -21,7 +21,7 @@ npm run omniseed -- plan examples/minimal --json
 npm run runtime
 ```
 
-The [getting-started guide](docs/getting-started/local-runtime.md) covers plan, apply, and restart. `npm run runtime` exposes domain and founding operations over HTTP at port 8787. By default it durably stores local company instances under `.omniseed/companies`; set `OMNISEED_DATA_DIR` to change this. Major commands produce structured output with `--json`.
+The [getting-started guide](docs/getting-started/local-runtime.md) covers plan, apply, and restart. `npm run dev` exposes domain and founding operations over HTTP at port 8787. By default the company runtime lives in `.omniseed/omniseed.db`; set `OMNISEED_DATABASE_FILE` to change this. One runtime and one SQLite database hold many capabilities while desired state, deployed state, evidence, and metadata remain logically separate. Major commands produce structured output with `--json`.
 
 ## Ecosystem and contribution map
 
