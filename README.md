@@ -4,7 +4,7 @@
 
 > **Licensing blocker:** this public repository has no explicit license yet. The source is publicly readable but not licensed for reuse as open source pending a maintainer decision.
 
-`Omniform (meaning) → OmniSeed (execution) → OmniSeed OS (interaction)`
+`Founder intent → reviewed draft → Omniform (meaning) → OmniSeed (persistent execution) → OmniSeed OS (interaction)`
 
 It is for runtime contributors, provider authors, automation builders, and architects who need deterministic Company-as-Code execution without a frontend or external account.
 
@@ -19,7 +19,7 @@ npm run omniseed -- plan examples/minimal --json
 npm run runtime
 ```
 
-The [getting-started guide](docs/getting-started/local-runtime.md) covers plan and apply. `npm run runtime` exposes the same domain operations over HTTP at port 8787 for OmniSeed OS and other actors. Major commands produce structured output with `--json`.
+The [getting-started guide](docs/getting-started/local-runtime.md) covers plan, apply, and restart. `npm run runtime` exposes domain and founding operations over HTTP at port 8787. By default it durably stores local company instances under `.omniseed/companies`; set `OMNISEED_DATA_DIR` to change this. Major commands produce structured output with `--json`.
 
 ## Ecosystem and contribution map
 
