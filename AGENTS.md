@@ -10,4 +10,6 @@ OmniSeed owns headless execution of Omniform. Read the README, relevant ADRs, an
 - No frontend business logic or OmniSeed OS dependency.
 - Major capabilities need structured machine surfaces usable by humans, software/AI, and future embodied machines.
 - Keep the runtime operations boundary stable; clients use transports rather than importing internal core modules.
+- Keep founding proposals non-canonical until authorized commit; never persist proposal workflow fields into Omniform.
+- Keep definition, portable state, evidence, and runtime metadata in separate stores and snapshots free of secrets.
 - Make the smallest coherent change; update tests, docs, examples, and events. Run `npm run lint && npm test && npm run build` and report evidence.
