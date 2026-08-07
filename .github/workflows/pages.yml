@@ -10,7 +10,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
-      - run: mkdir _site && cp -R docs/* _site/ && printf '\nSource: %s@%s\n' "$GITHUB_REPOSITORY" "$GITHUB_SHA" >> _site/index.md
+        with: {enablement: true}
+      - run: npm run docs:build
       - uses: actions/upload-pages-artifact@v3
       - id: deployment
         uses: actions/deploy-pages@v4

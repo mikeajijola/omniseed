@@ -2,6 +2,8 @@
 
 **OmniSeed is the open headless reference engine for Omniform.** It validates definitions, calculates capability state, plans, applies approved changes, observes evidence, detects drift, and emits structured events.
 
+> **Licensing blocker:** this public repository has no explicit license yet. The source is publicly readable but not licensed for reuse as open source pending a maintainer decision.
+
 `Omniform (meaning) → OmniSeed (execution) → OmniSeed OS (interaction)`
 
 It is for runtime contributors, provider authors, automation builders, and architects who need deterministic Company-as-Code execution without a frontend or external account.
@@ -14,9 +16,10 @@ Requires Node.js 20+; no cloud account, Docker, database, or AI key is needed.
 npm test
 npm run omniseed -- validate examples/minimal --json
 npm run omniseed -- plan examples/minimal --json
+npm run runtime
 ```
 
-The [getting-started guide](docs/getting-started/local-runtime.md) covers plan and apply. Major commands produce structured output with `--json`.
+The [getting-started guide](docs/getting-started/local-runtime.md) covers plan and apply. `npm run runtime` exposes the same domain operations over HTTP at port 8787 for OmniSeed OS and other actors. Major commands produce structured output with `--json`.
 
 ## Ecosystem and contribution map
 
