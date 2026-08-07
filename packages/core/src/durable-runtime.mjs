@@ -6,6 +6,7 @@ export class DurableOmniSeedRuntime extends OmniSeedRuntime {
     return new DurableOmniSeedRuntime({definition,deployment,companyId,definitionStore,stateStore,metadataStore,clock,semanticEvaluator});
   }
   constructor(options){super(options);Object.assign(this,{companyId:options.companyId,definitionStore:options.definitionStore,stateStore:options.stateStore,metadataStore:options.metadataStore})}
+  getRuntimeStatus(){return {mode:'live',reachable:true,persistence:this.stateStore?.constructor?.name==='FileStateStore'?'file':'replaceable',version:'0.1.0'}}
   async generatePlan(input={}){const result=super.generatePlan(input);if(input.definition)await this.definitionStore.save(this.companyId,this.definition);return result}
   async applyPlan(input={}){const result=super.applyPlan(input);await this.stateStore.save(this.companyId,this.deployment);await this.metadataStore?.append(this.companyId,'applies',{version:this.deployment.version,planId:this.deployment.lastAppliedPlan,approvedBy:input.authorization.actorId,approvedChangeIds:input.approvedChangeIds,timestamp:this.clock()});return result}
 }

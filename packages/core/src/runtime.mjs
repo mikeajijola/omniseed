@@ -1,7 +1,7 @@
 import {validateDefinition,evaluateCapabilities,createPlan,applyPlan,event} from './index.mjs';
 import {executeObservations} from './observations.mjs';
 
-export const RUNTIME_OPERATIONS=['getCompany','listCapabilities','getCapability','listGaps','getCurrentPlan','generatePlan','cancelPlan','getState','listActivity','listObservations','listFindings','applyPlan'];
+export const RUNTIME_OPERATIONS=['getRuntimeStatus','getCompany','listCapabilities','getCapability','listGaps','getCurrentPlan','generatePlan','cancelPlan','getState','listActivity','listObservations','listFindings','applyPlan'];
 
 export class OmniSeedRuntime {
   constructor({definition,deployment={version:0,resources:{}},clock=()=>new Date().toISOString(),semanticEvaluator}={}) {
@@ -16,6 +16,7 @@ export class OmniSeedRuntime {
     if(!RUNTIME_OPERATIONS.includes(operation)) throw Object.assign(new Error(`Unknown runtime operation: ${operation}`),{statusCode:404});
     return this[operation](input);
   }
+  getRuntimeStatus(){return {mode:'live',reachable:true,persistence:'memory',version:'0.1.0'}}
   getCompany(){return {id:this.definition.company.id,name:this.definition.company.name,purpose:this.definition.company.purpose}}
   listCapabilities(){return Object.values(this.capabilities)}
   getCapability({id}){return this.capabilities[id]||null}
