@@ -14,6 +14,7 @@ OmniSeed owns headless execution of Omniform. Read the README, relevant ADRs, an
 - Keep founding proposals non-canonical until authorized commit; never persist proposal workflow fields into Omniform.
 - Keep definition, portable state, evidence, and runtime metadata in separate stores and snapshots free of secrets.
 - Vercel Functions may host the runtime but cannot be its persistence layer. Hosted stores must stay behind DefinitionStore, StateStore, and RuntimeMetadataStore contracts.
+- Prefer one runtime and one SQLite database. Before adding Redis, queues, vector stores, workflow engines, caches, or services, document why the runtime plus SQLite cannot reliably meet the requirement.
 - Anonymous hosted actors are read-only. Derive mutation authority from authenticated server context, never from permissions asserted by the browser.
 - Do not introduce a resource abstraction that competes with Capability. Agents, skills, connectors, workflows, schedules, providers, people, partners, and machines realise capabilities through explicit offerings.
 - Resolve natural language into structured capability intent. Coverage, policy, approved execution, persistence, schedules, audit, and evidence remain deterministic; Lily never calls provider SDKs.
