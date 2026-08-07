@@ -3,10 +3,12 @@ export class DurableOmniSeedRuntime extends OmniSeedRuntime {
   static async open({companyId,definitionStore,stateStore,metadataStore,bootstrapDefinition,bootstrapState,clock,semanticEvaluator}){
     let definition=await definitionStore.load(companyId);if(!definition&&bootstrapDefinition){definition=bootstrapDefinition;await definitionStore.save(companyId,definition)}if(!definition)throw new Error(`Company definition not found: ${companyId}`);
     let deployment=await stateStore.load(companyId);if(!deployment){deployment=bootstrapState||{version:0,resources:{}};await stateStore.save(companyId,deployment)}
-    return new DurableOmniSeedRuntime({definition,deployment,companyId,definitionStore,stateStore,metadataStore,clock,semanticEvaluator});
+    const runtime=new DurableOmniSeedRuntime({definition,deployment,companyId,definitionStore,stateStore,metadataStore,clock,semanticEvaluator});const events=await metadataStore?.list(companyId,'events')||[];if(events.length)runtime.activity=events;const plans=await metadataStore?.list(companyId,'current-plan')||[];runtime.plan=plans.at(-1)||null;runtime.persistedEventCount=runtime.activity.length;return runtime;
   }
   constructor(options){super(options);Object.assign(this,{companyId:options.companyId,definitionStore:options.definitionStore,stateStore:options.stateStore,metadataStore:options.metadataStore})}
-  getRuntimeStatus(){return {mode:'live',reachable:true,persistence:this.stateStore?.constructor?.name==='FileStateStore'?'file':'replaceable',version:'0.1.0'}}
+  getRuntimeStatus(){const name=this.stateStore?.constructor?.name;return {mode:'live',reachable:true,persistence:name==='FileStateStore'?'file':name==='HostedStateStore'?'hosted':'memory',version:'0.2.0'}}
+  async invoke(operation,input={}){const result=await super.invoke(operation,input);await this.persistRuntime();return result}
   async generatePlan(input={}){const result=super.generatePlan(input);if(input.definition)await this.definitionStore.save(this.companyId,this.definition);return result}
   async applyPlan(input={}){const result=super.applyPlan(input);await this.stateStore.save(this.companyId,this.deployment);await this.metadataStore?.append(this.companyId,'applies',{version:this.deployment.version,planId:this.deployment.lastAppliedPlan,approvedBy:input.authorization.actorId,approvedChangeIds:input.approvedChangeIds,timestamp:this.clock()});return result}
+  async persistRuntime(){if(!this.metadataStore)return;for(const item of this.activity.slice(this.persistedEventCount||0))await this.metadataStore.append(this.companyId,'events',item);this.persistedEventCount=this.activity.length;if(this.metadataStore.replace)await this.metadataStore.replace(this.companyId,'current-plan',this.plan?[this.plan]:[]);else if(this.plan)await this.metadataStore.append(this.companyId,'current-plan',this.plan)}
 }

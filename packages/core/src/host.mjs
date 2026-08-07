@@ -1,24 +1,14 @@
 import {DurableOmniSeedRuntime} from './durable-runtime.mjs';import {FoundingService,proposalToOmniform} from './founding.mjs';
 export const FOUNDING_OPERATIONS=['startFoundingSession','submitFounderIntent','getFoundingDraft','refineFoundingDraft','acceptDraftItem','rejectDraftItem','updateDraftItem','addDraftItem','explainFoundingItem','validateFoundingDraft','commitFoundingDraft','loadCompany'];
 export class OmniSeedHost {
-  static async open(options){const host=new OmniSeedHost(options);await host.load(options.companyId,options.bootstrapDefinition,options.bootstrapState);return host}
+  static async open(options){const host=new OmniSeedHost(options);await host.load(options.companyId,options.bootstrapDefinition,options.bootstrapState);const snapshots=await options.metadataStore?.list(options.companyId,'founding-sessions')||[];if(snapshots.length)host.foundingService.importSessions(snapshots.at(-1).sessions);return host}
   constructor({definitionStore,stateStore,metadataStore,foundingService=new FoundingService(),clock}={}){Object.assign(this,{definitionStore,stateStore,metadataStore,foundingService,clock})}
   async load(companyId,bootstrapDefinition,bootstrapState){this.runtime=await DurableOmniSeedRuntime.open({companyId,definitionStore:this.definitionStore,stateStore:this.stateStore,metadataStore:this.metadataStore,bootstrapDefinition,bootstrapState,clock:this.clock});this.companyId=companyId;return this.runtime.getCompany()}
   async invoke(operation,input={}){
     if(!FOUNDING_OPERATIONS.includes(operation))return this.runtime.invoke(operation,input);
-    if(operation==='loadCompany')return this.load(input.companyId);
-    if(operation==='startFoundingSession')return this.foundingService.startFoundingSession(input);
-    if(operation==='submitFounderIntent')return this.foundingService.submitFounderIntent(input);
-    if(operation==='getFoundingDraft')return this.foundingService.getFoundingDraft(input);
-    if(operation==='refineFoundingDraft')return this.foundingService.refineFoundingDraft(input);
-    if(operation==='acceptDraftItem')return this.foundingService.updateDraftItem({...input,status:'accepted'});
-    if(operation==='rejectDraftItem')return this.foundingService.updateDraftItem({...input,status:'rejected'});
-    if(operation==='updateDraftItem')return this.foundingService.updateDraftItem({...input,status:'edited'});
-    if(operation==='addDraftItem')return this.foundingService.addDraftItem(input);
-    if(operation==='explainFoundingItem')return this.foundingService.explainFoundingItem(input);
-    if(operation==='validateFoundingDraft')return this.foundingService.validateFoundingDraft(input);
-    if(operation==='commitFoundingDraft')return this.commitFoundingDraft(input);
+    let result;if(operation==='loadCompany')result=await this.load(input.companyId);else if(operation==='startFoundingSession')result=this.foundingService.startFoundingSession(input);else if(operation==='submitFounderIntent')result=await this.foundingService.submitFounderIntent(input);else if(operation==='getFoundingDraft')result=this.foundingService.getFoundingDraft(input);else if(operation==='refineFoundingDraft')result=await this.foundingService.refineFoundingDraft(input);else if(operation==='acceptDraftItem')result=this.foundingService.updateDraftItem({...input,status:'accepted'});else if(operation==='rejectDraftItem')result=this.foundingService.updateDraftItem({...input,status:'rejected'});else if(operation==='updateDraftItem')result=this.foundingService.updateDraftItem({...input,status:'edited'});else if(operation==='addDraftItem')result=this.foundingService.addDraftItem(input);else if(operation==='explainFoundingItem')result=this.foundingService.explainFoundingItem(input);else if(operation==='validateFoundingDraft')result=this.foundingService.validateFoundingDraft(input);else if(operation==='commitFoundingDraft')result=await this.commitFoundingDraft(input);if(operation!=='getFoundingDraft'&&operation!=='validateFoundingDraft'&&operation!=='explainFoundingItem')await this.persistFoundingSessions();return result;
   }
+  async persistFoundingSessions(){if(!this.metadataStore)return;const snapshot={version:Date.now(),sessions:this.foundingService.exportSessions()};if(this.metadataStore.replace)await this.metadataStore.replace(this.companyId,'founding-sessions',[snapshot]);else await this.metadataStore.append(this.companyId,'founding-sessions',snapshot)}
   async commitFoundingDraft({sessionId,authorization}={}){
     if(!authorization?.actorId||!authorization.permissions?.includes('commit_company'))throw Object.assign(new Error('commit_company authorization required'),{statusCode:403});
     const session=this.foundingService.require(sessionId),validation=this.foundingService.validateFoundingDraft({sessionId});if(!validation.valid)throw Object.assign(new Error('Founding draft is invalid'),{statusCode:400,details:validation.errors});

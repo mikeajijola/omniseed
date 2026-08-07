@@ -40,6 +40,40 @@
       }
     },
     {
+      "name": "get_resource",
+      "description": "Inspect a resource, its capability offerings, provider, health, permissions, and company-capability relationships.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": [
+          "object",
+          "null"
+        ]
+      },
+      "metadata": {
+        "version": "0.1.0",
+        "mutation": false,
+        "approval": {
+          "mode": "none"
+        },
+        "risk": "none",
+        "permissions": [
+          "read_company"
+        ]
+      }
+    },
+    {
       "name": "generate_plan",
       "description": "Generate a proposed organisational change plan without authorizing execution.",
       "inputSchema": {
