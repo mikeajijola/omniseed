@@ -62,3 +62,4 @@ export const EVENT_TYPES=['definition.loaded','definition.validated','plan.creat
 export {WELL_KNOWN_OBSERVATION_TYPES,evaluateAssertion,executeObservations,MockSemanticEvaluator} from './observations.mjs';
 export {MemoryStateStore,FileStateStore,MemoryDefinitionStore,FileDefinitionStore,MemoryRuntimeMetadataStore,FileRuntimeMetadataStore} from './stores.mjs';
 export {applyExternalChange,observeExternalResource,detectProviderDrift,evaluateSemanticObservation,proposeFindingResponses,runProviderControlLoop} from './provider-control-loop.mjs';
+export {OPERATION_REGISTRY,STEWARD_ACTOR_ID,discoverOperations,DeterministicIntentResolver,stewardIdentity,organisationalLearning} from './control-plane.mjs';

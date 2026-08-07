@@ -10,7 +10,7 @@ Founding adds `startFoundingSession`, `submitFounderIntent`, `getFoundingDraft`,
 
 | Operation | Human | Software/AI | Embodied-machine/controller |
 | --- | --- | --- | --- |
-| Read state/gaps/findings | OS views or Eve answer | Structured tool/API | Same transport operation |
+| Read state/gaps/findings | OS views or Lily answer | Structured tool/API | Same transport operation |
 | Generate plan | Plan action | `generatePlan` tool/API | Same operation through controller |
 | Apply approved changes | Approval/apply control | Authorized `applyPlan` tool | Authorized operation through controller |
 
