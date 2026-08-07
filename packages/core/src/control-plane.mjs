@@ -18,7 +18,7 @@ export const OPERATION_REGISTRY=Object.freeze([
   operation('present_evidence','Project evidence and provenance.','presentEvidence',{permissions:['read_company'],inputs:{id:'evidence_id'},interfaces:['ui','lily']}),
   operation('present_activity','Project company activity.','presentActivity',{permissions:['read_company'],interfaces:['ui','lily']}),
   operation('present_infrastructure','Project provider realisations subordinate to capabilities.','presentInfrastructure',{permissions:['read_company'],interfaces:['ui','lily']}),
-  ...CORE_OPERATION_CATALOG.operations.map(item=>({...item,runtimeOperation:{get_capability:'getCapability',generate_plan:'generatePlan',apply_plan:'applyPlan'}[item.id],inputSchema:item.input,outputSchema:item.output,approvalRequired:item.approval.mode==='required',applicableTypes:item.applicableResourceTypes,interfaces:item.interfaces.map(surface=>({human:'ui',agent:'lily',machine:'controller'}[surface]||surface))}))
+  ...CORE_OPERATION_CATALOG.operations.map(item=>({...item,runtimeOperation:{get_capability:'getCapability',generate_plan:'generatePlan',apply_plan:'applyPlan',resolve_capability:'resolveCapability',get_capability_realisation:'getCapabilityRealisation',list_attention:'listAttention',accept_capability_gap:'acceptCapabilityGap'}[item.id],inputSchema:item.input,outputSchema:item.output,approvalRequired:item.approval.mode==='required',applicableTypes:item.applicableResourceTypes,interfaces:item.interfaces.map(surface=>({human:'ui',agent:'lily',machine:'controller'}[surface]||surface))}))
 ]);
 
 function operation(id,description,runtimeOperation,options={}) {return {id,name:id.split('_').map(title).join(' '),description,runtimeOperation,permissions:[],inputs:{},outputs:{type:'structured'},risk:'none',mutation:false,approvalRequired:false,applicableTypes:['company'],interfaces:['api'],...options}}
@@ -34,10 +34,10 @@ export class DeterministicIntentResolver {
     if(/delete|destroy|remove/.test(normalized)&&!specificTarget(normalized,companyContext.resources))return result('clarification_required',{intent:'remove_resource',candidateOperations:['generate_plan'],clarification:'Which specific resource do you mean? No destructive plan has been generated.'});
     const target=findCapability(normalized,companyContext.capabilities||[]);
     if(/go ahead|apply|do it|fix it|can you fix/.test(normalized))return result('resolved',{intent:'request_execution',target:target?.id,candidateOperations:allowed(['inspect_plan','apply_plan'],available),requiresApproval:true});
-    if(/how would|plan|what should we do|sort out|improve|fix/.test(normalized))return result('resolved',{intent:'improve_capability',target:target?.id,candidateOperations:allowed(['get_capability','generate_plan','present_plan'],available)});
+    if(/i need|want .*able to|how would|plan|what should we do|sort out|improve|fix/.test(normalized))return result('resolved',{intent:'realise_capability',target:target?.id,candidateOperations:allowed(['get_capability','resolve_capability','generate_plan','present_plan'],available)});
     if(/infrastructure|supporting|running on|depend on/.test(normalized))return result('resolved',{intent:'inspect_infrastructure',target:target?.id,candidateOperations:allowed(['list_infrastructure','present_capability'],available)});
     if(/changed|happened/.test(normalized))return result('resolved',{intent:'inspect_activity',candidateOperations:allowed(['list_activity','present_activity'],available)});
-    if(/wrong|attention|missing|degraded/.test(normalized))return result('resolved',{intent:'inspect_gaps',target:target?.id,candidateOperations:allowed(['list_gaps','list_findings','present_capability'],available)});
+    if(/wrong|attention|missing|degraded/.test(normalized))return result('resolved',{intent:'inspect_gaps',target:target?.id,candidateOperations:allowed(['list_attention','list_gaps','list_findings','present_capability'],available)});
     if(/show me|why|capabilit/.test(normalized))return result('resolved',{intent:'inspect_capability',target:target?.id,candidateOperations:allowed(['get_capability','list_capabilities','present_capability'],available)});
     return result('unsupported',{intent:'unknown',candidateOperations:[],clarification:'I cannot map that request to an available governed capability yet.'});
   }

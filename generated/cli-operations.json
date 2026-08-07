@@ -76,6 +76,70 @@
           }
         }
       }
+    },
+    {
+      "operation": "resolve_capability",
+      "alias": null,
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "capabilityId"
+        ],
+        "properties": {
+          "capabilityId": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "operation": "get_capability_realisation",
+      "alias": null,
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "capabilityId"
+        ],
+        "properties": {
+          "capabilityId": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "operation": "list_attention",
+      "alias": null,
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false
+      }
+    },
+    {
+      "operation": "accept_capability_gap",
+      "alias": null,
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "capabilityId",
+          "reason",
+          "authorization"
+        ],
+        "properties": {
+          "capabilityId": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "authorization": {
+            "type": "object"
+          }
+        }
+      }
     }
   ]
 }

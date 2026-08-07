@@ -2,14 +2,15 @@ import {validateDefinition,evaluateCapabilities,createPlan,applyPlan,event} from
 import {executeObservations} from './observations.mjs';
 import {discoverOperations,DeterministicIntentResolver} from './control-plane.mjs';
 import {compileOmniform,CORE_OPERATION_CATALOG,operationIndex,operationToolDefinitions} from './compiler.mjs';
+import {CapabilityResolver,attentionItems} from './realisations.mjs';
 
-export const RUNTIME_OPERATIONS=['getRuntimeStatus','getCapabilityRegistry','listOperations','describeOperation','getAgentTools','executeOperation','discoverOperations','resolveIntent','getCompany','listCapabilities','getCapability','listGaps','getCurrentPlan','generatePlan','cancelPlan','getState','getInfrastructure','listActivity','listObservations','listFindings','applyPlan'];
+export const RUNTIME_OPERATIONS=['getRuntimeStatus','getCapabilityRegistry','listOperations','describeOperation','getAgentTools','executeOperation','discoverOperations','resolveIntent','getCompany','listCapabilities','getCapability','listGaps','resolveCapability','getCapabilityRealisation','listAttention','acceptCapabilityGap','getCurrentPlan','generatePlan','cancelPlan','getState','getInfrastructure','listActivity','listObservations','listFindings','applyPlan'];
 
 export class OmniSeedRuntime {
   constructor({definition,deployment={version:0,resources:{}},clock=()=>new Date().toISOString(),semanticEvaluator}={}) {
     const validation=validateDefinition(definition); if(!validation.valid) throw new Error(`Invalid Omniform definition: ${JSON.stringify(validation.errors)}`);
-    this.definition=structuredClone(definition);this.deployment=structuredClone(deployment);this.clock=clock;this.semanticEvaluator=semanticEvaluator;this.intentResolver=new DeterministicIntentResolver();
-    this.plan=null;this.activity=[];this.findings=[];this.observationExecutions=[];this.operationRegistry=compileOmniform(CORE_OPERATION_CATALOG,{handlers:{get_capability:implemented(input=>this.getCapability(input),'omniseed-core','getCapability'),generate_plan:implemented(input=>this.generatePlan(input),'omniseed-core','generatePlan'),apply_plan:implemented(input=>this.applyPlan(input),'omniseed-core','applyPlan')}});
+    this.definition=structuredClone(definition);this.deployment=structuredClone(deployment);this.clock=clock;this.semanticEvaluator=semanticEvaluator;this.intentResolver=new DeterministicIntentResolver();this.capabilityResolver=new CapabilityResolver();
+    this.plan=null;this.activity=[];this.findings=[];this.observationExecutions=[];this.operationRegistry=compileOmniform(CORE_OPERATION_CATALOG,{handlers:{get_capability:implemented(input=>this.getCapability(input),'omniseed-core','getCapability'),generate_plan:implemented(input=>this.generatePlan(input),'omniseed-core','generatePlan'),apply_plan:implemented(input=>this.applyPlan(input),'omniseed-core','applyPlan'),resolve_capability:implemented(input=>this.resolveCapability(input),'omniseed-core','resolveCapability'),get_capability_realisation:implemented(input=>this.getCapabilityRealisation(input),'omniseed-core','getCapabilityRealisation'),list_attention:implemented(()=>this.listAttention(),'omniseed-core','listAttention'),accept_capability_gap:implemented(input=>this.acceptCapabilityGap(input),'omniseed-core','acceptCapabilityGap')}});
     this.record('definition.loaded',{company:this.definition.company.id});this.record('definition.validated',{valid:true});this.refresh();
   }
   record(type,data){const item=event(type,data,this.clock());this.activity.push(item);return item}
@@ -23,13 +24,17 @@ export class OmniSeedRuntime {
   listOperations({interface:surface}={}){return this.operationRegistry.list({interface:surface})}
   describeOperation({id}){return this.operationRegistry.get(id)}
   getAgentTools(){return operationToolDefinitions(this.operationRegistry)}
-  executeOperation({id,input={},authorization}={}){return this.operationRegistry.execute(id,input,{authorization:{...authorization,approved:id==='apply_plan'&&Boolean(input.approvedChangeIds?.length)}})}
+  executeOperation({id,input={},authorization}={}){return this.operationRegistry.execute(id,input,{authorization:{...authorization,approved:Boolean(authorization?.approved)||(id==='apply_plan'&&Boolean(input.approvedChangeIds?.length))}})}
   discoverOperations({interface:surface}={}){const canonical={lily:'agent',ui:'human',controller:'machine'}[surface]||surface;const generated=this.operationRegistry.list({interface:canonical});const legacy=discoverOperations({interface:surface}).filter(item=>!this.operationRegistry.get(item.id));return [...generated,...legacy]}
   resolveIntent({utterance}){return this.intentResolver.resolve(utterance,{capabilities:this.listCapabilities(),resources:this.definition.company.resources||[]},this.discoverOperations({interface:'lily'}))}
   getCompany(){return {id:this.definition.company.id,name:this.definition.company.name,purpose:this.definition.company.purpose}}
   listCapabilities(){return Object.values(this.capabilities)}
   getCapability({id}){return this.capabilities[id]||null}
   listGaps(){return Object.values(this.capabilities).filter(item=>item.required&&item.state!=='realised')}
+  resolveCapability({capabilityId}){const capability=this.definition.company.capabilities.find(item=>item.id===capabilityId);if(!capability)throw Object.assign(new Error('Capability not found'),{statusCode:404});return this.capabilityResolver.resolve({capability,resources:this.definition.company.resources||[],providerOfferings:this.definition.company.providerOfferings||[],deployment:this.deployment,strategy:this.definition.company.strategy||{}})}
+  getCapabilityRealisation({capabilityId}){const calculated=this.capabilities[capabilityId];if(!calculated)return null;const selected=(this.definition.company.realisations||[]).find(item=>item.capability===capabilityId)||null;return {capability:calculated,selected,resources:(this.definition.company.resources||[]).filter(item=>(selected?.resources||calculated.resources).includes(item.id)),attempts:this.deployment.realisationAttempts?.[capabilityId]||[]}}
+  listAttention(){return attentionItems({capabilities:this.listCapabilities(),plan:this.plan,findings:this.findings})}
+  acceptCapabilityGap({capabilityId,reason,authorization}){if(!authorization?.actorId||!authorization.permissions?.includes('govern_company'))throw Object.assign(new Error('govern_company authorization required'),{statusCode:403});this.deployment.acceptedGaps||={};this.deployment.acceptedGaps[capabilityId]={reason,actorId:authorization.actorId,at:this.clock()};this.record('capability.gap.accepted',{capability:capabilityId,reason,actor:authorization.actorId});this.refresh();return {capability:this.capabilities[capabilityId],decision:this.deployment.acceptedGaps[capabilityId]}}
   getCurrentPlan(){return this.plan}
   generatePlan({definition}={}) {
     if(definition){const validation=validateDefinition(definition);if(!validation.valid)throw Object.assign(new Error('Invalid proposed definition'),{statusCode:400,details:validation.errors});this.definition=structuredClone(definition);this.record('definition.loaded',{company:this.definition.company.id,proposed:true});}

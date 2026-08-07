@@ -13,4 +13,6 @@ OmniSeed owns headless execution of Omniform. Read the README, relevant ADRs, an
 - Keep the runtime operations boundary stable; clients use transports rather than importing internal core modules.
 - Keep founding proposals non-canonical until authorized commit; never persist proposal workflow fields into Omniform.
 - Keep definition, portable state, evidence, and runtime metadata in separate stores and snapshots free of secrets.
+- Do not introduce a resource abstraction that competes with Capability. Agents, skills, connectors, workflows, schedules, providers, people, partners, and machines realise capabilities through explicit offerings.
+- Resolve natural language into structured capability intent. Coverage, policy, approved execution, persistence, schedules, audit, and evidence remain deterministic; Lily never calls provider SDKs.
 - Make the smallest coherent change; update tests, docs, examples, and events. Run `npm run lint && npm test && npm run build` and report evidence.

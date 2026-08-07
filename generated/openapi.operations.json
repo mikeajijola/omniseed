@@ -224,6 +224,217 @@
           }
         }
       }
+    },
+    "/operations/resolve_capability": {
+      "get": {
+        "summary": "Describe resolve_capability",
+        "responses": {
+          "200": {
+            "description": "Omniform operation metadata"
+          }
+        }
+      },
+      "post": {
+        "summary": "Calculate coverage, gaps, and candidate realisations for a required company capability.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "capabilityId"
+                    ],
+                    "properties": {
+                      "capabilityId": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "authorization": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Validated operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/operations/get_capability_realisation": {
+      "get": {
+        "summary": "Describe get_capability_realisation",
+        "responses": {
+          "200": {
+            "description": "Omniform operation metadata"
+          }
+        }
+      },
+      "post": {
+        "summary": "Inspect selected resources and requirement coverage for a company capability.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "capabilityId"
+                    ],
+                    "properties": {
+                      "capabilityId": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "authorization": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Validated operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/operations/list_attention": {
+      "get": {
+        "summary": "Describe list_attention",
+        "responses": {
+          "200": {
+            "description": "Omniform operation metadata"
+          }
+        }
+      },
+      "post": {
+        "summary": "List gaps, blocked work, approvals, findings, drift, and stale evidence requiring attention.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "object",
+                    "additionalProperties": false
+                  },
+                  "authorization": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Validated operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/operations/accept_capability_gap": {
+      "get": {
+        "summary": "Describe accept_capability_gap",
+        "responses": {
+          "200": {
+            "description": "Omniform operation metadata"
+          }
+        }
+      },
+      "post": {
+        "summary": "Record an explicit governed decision to accept a currently unmet capability requirement.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "capabilityId",
+                      "reason",
+                      "authorization"
+                    ],
+                    "properties": {
+                      "capabilityId": {
+                        "type": "string"
+                      },
+                      "reason": {
+                        "type": "string"
+                      },
+                      "authorization": {
+                        "type": "object"
+                      }
+                    }
+                  },
+                  "authorization": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Validated operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }
