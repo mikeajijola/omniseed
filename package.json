@@ -1,0 +1,12 @@
+{
+  "name": "@omniseed/engine",
+  "version": "1.0.0-alpha.1",
+  "description": "Headless compiler, planner, provisioner and reconciler for Company-as-Code.",
+  "type": "module",
+  "exports": { ".": "./src/index.js" },
+  "bin": { "omniseed": "./src/cli.js" },
+  "scripts": { "test": "node --test", "check": "npm test" },
+  "dependencies": { "@omniseed/omniform": "file:../omniform" },
+  "engines": { "node": ">=22" },
+  "license": "Apache-2.0"
+}
