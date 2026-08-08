@@ -13,14 +13,24 @@ export async function applyExternalChange({provider,change,authorizedBy}) {
   return {providerPlan,result,audit:{actorId:authorizedBy.actorId,changeId:change.id}};
 }
 
+export async function importExternalResource({provider,resource,externalResource,authorizedBy}) {
+  assertProvider(provider);
+  if(typeof provider.import!=='function')throw Object.assign(new Error('Provider does not support import'),{statusCode:400});
+  if(!authorizedBy?.actorId||!authorizedBy.permissions?.includes('apply_plan'))throw Object.assign(new Error('apply_plan authorization required'),{statusCode:403});
+  const validation=await provider.validate(resource);
+  if(!validation.valid)throw Object.assign(new Error('Provider resource validation failed'),{statusCode:400,details:validation.errors});
+  const result=await provider.import(resource,externalResource);
+  return {result,audit:{actorId:authorizedBy.actorId,resourceId:resource.id,externalId:externalResource.externalId,action:'import'}};
+}
+
 export async function observeExternalResource({provider,resource,deployedState}) {
   assertProvider(provider);
   return provider.observe(resource,deployedState);
 }
 
 export function detectProviderDrift({resource,deployedState,observation}) {
-  const desired=resource.provider?.github||{};const actual=observation.external||{};const differences=[];
-  for(const [desiredField,actualField] of [['name','name'],['description','description'],['private','private'],['defaultBranch','defaultBranch'],['archived','archived']]) {
+  const desired=resource.provider?.[Object.keys(resource.provider||{})[0]]||{};const actual=observation.external||{};const differences=[];
+  for(const [desiredField,actualField] of [['name','name'],['description','description'],['private','private'],['defaultBranch','defaultBranch'],['archived','archived'],['framework','framework'],['target','target'],['verified','verified']]) {
     if(desired[desiredField]!==undefined&&desired[desiredField]!==actual[actualField]) differences.push({field:desiredField,desired:desired[desiredField],observed:actual[actualField]});
   }
   const status=deployedState?.status&&observation.status!==deployedState.status?{field:'status',desired:deployedState.status,observed:observation.status}:null;

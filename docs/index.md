@@ -2,6 +2,8 @@
 
 The [capability-realisation loop](concepts/capability-realisation-loop.md) explains how requirements, resource offerings, policy, providers, and evidence turn declared intent into calculated company ability.
 
+The [company control plane architecture](concepts/company-control-plane-architecture.md) is the canonical end-to-end view of Lily, capabilities, realisations, providers, evidence, and the semantic-to-deterministic handoff.
+
 The [hosted runtime](concepts/hosted-runtime.md) documents durable stores, public read-only access, and the replaceable Vercel Functions adapter.
 
 - **Founder/operator:** OmniSeed OS is the friendly surface; use this runtime guide to understand what it executes.

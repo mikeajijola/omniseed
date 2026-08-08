@@ -18,4 +18,7 @@ OmniSeed owns headless execution of Omniform. Read the README, relevant ADRs, an
 - Anonymous hosted actors are read-only. Derive mutation authority from authenticated server context, never from permissions asserted by the browser.
 - Do not introduce a resource abstraction that competes with Capability. Agents, skills, connectors, workflows, schedules, providers, people, partners, and machines realise capabilities through explicit offerings.
 - Resolve natural language into structured capability intent. Coverage, policy, approved execution, persistence, schedules, audit, and evidence remain deterministic; Lily never calls provider SDKs.
+- Capability is primary. Connector is first-class and distinct from Provider; providers advertise and implement only the Omniform primitives they support.
+- The UI is a projection of runtime state. Lily always uses OmniSeed operations, and company truth must never be hard-coded downstream.
+- Prefer reusable Omniform packages over hard-coded domain behaviour and do not add infrastructure without demonstrated need.
 - Make the smallest coherent change; update tests, docs, examples, and events. Run `npm run lint && npm test && npm run build` and report evidence.

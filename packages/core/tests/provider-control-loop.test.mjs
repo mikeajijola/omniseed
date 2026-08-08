@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createGitHubProvider} from '../../../providers/github/index.mjs';
-import {applyExternalChange,runProviderControlLoop,MockSemanticEvaluator} from '../src/index.mjs';
+import {applyExternalChange,importExternalResource,runProviderControlLoop,MockSemanticEvaluator} from '../src/index.mjs';
 
 const resource={id:'company_repository',type:'github_repository',realises:['source_control'],provider:{github:{owner:'acme',name:'company',description:'Canonical company source',private:true,defaultBranch:'main'}}};
 
@@ -25,4 +25,12 @@ test('GitHub observe produces drift, structured semantic finding, and authorized
   assert.equal(result.findings[0].observationId,'repository_governance');assert.equal(result.findings[0].evidenceReferences[0],'provider:github:repository:acme/company');
   assert.equal(result.proposedResponses[0].action,'generate_plan');assert.equal(result.proposedResponses[0].authorization,'required');
   assert.deepEqual(result.events.map(item=>item.type),['provider.observed','drift.detected','semantic.finding.created','response.proposed']);
+});
+
+test('provider adoption is authorized and records an auditable external ID',async()=>{
+  const adoptedResource={id:'os',type:'vercel_project',provider:{vercel:{name:'omniseed-os'}}};
+  const provider={validate:async()=>({valid:true,errors:[]}),plan:async()=>({}),apply:async()=>({}),observe:async()=>({}),import:async()=>({providerId:'vercel:project:prj_os',status:'active',adopted:true})};
+  await assert.rejects(importExternalResource({provider,resource:adoptedResource,externalResource:{externalId:'prj_os'},authorizedBy:{actorId:'lily',permissions:[]}}),/authorization/);
+  const imported=await importExternalResource({provider,resource:adoptedResource,externalResource:{externalId:'prj_os'},authorizedBy:{actorId:'owner',permissions:['apply_plan']}});
+  assert.equal(imported.result.adopted,true);assert.deepEqual(imported.audit,{actorId:'owner',resourceId:'os',externalId:'prj_os',action:'import'});
 });
