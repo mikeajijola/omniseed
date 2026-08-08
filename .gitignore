@@ -1,6 +1,0 @@
-node_modules/
-dist/
-_site/
-.omniseed/
-*.state.json
-.DS_Store
