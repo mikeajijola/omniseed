@@ -2,6 +2,10 @@
 
 The control loop is `load → compile → diff → plan → approve → apply → observe → persist → compile`.
 
-Provider adapters advertise primitive families and implement validation, planning, application, observation, discovery and health. A concrete plan binds every action to the provider selected for its family. State-version checks prevent an approved plan from being applied against a different reality.
+Provider adapters are explicitly registered and advertise primitive families and capability offerings. Desired, installed, configured, connected and healthy are distinct. The resolver moves from requirements and current coverage to candidate realisations; exact resources in Omniform are optional constraints.
+
+A concrete plan binds every action to the provider selected for its family. Plans are persisted and content-hashed. Actor-scoped approval names the exact plan hash and selected action IDs. Definition and state-version checks prevent approval reuse against a different reality.
 
 Semantic systems may propose Omniform or a realisation, but only this deterministic path mutates resources. Desired declarations, deployed resources, observations, evidence and history are stored as distinct records.
+
+Declared operations compile into an executable registry containing implementation, permission, mutation, approval, provider dependency and availability truth. Declaration alone never makes an operation executable.
