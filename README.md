@@ -24,3 +24,5 @@ Distribution consumes the versioned `@omniseed/omniform` package. A sibling chec
 OmniSeed accepts canonical Omniform objects loaded from either YAML or JSON; runtime logic is serialization-neutral. `company_search` routes governed indexing and retrieval through an explicitly registered provider. The included `LocalCompanySearchProvider` is deterministic, isolated by company ID, and intended only for local development/tests. turbopuffer is a possible future adapter—not an OmniSeed dependency.
 
 Company Search results use a provider-neutral shape with provenance, source, capability/evidence references, optional relevance, timestamps and metadata. Search is never authoritative for definitions, provider IDs, plans, approvals, permissions, state versions, applies, or evidence metadata.
+
+The first production adapter lives in `providers/vercel`. It discovers and adopts an existing project, deploys preview artifacts deterministically, and observes project/deployment reality independently. See [`docs/how-omniseed-runs-omniseed.md`](docs/how-omniseed-runs-omniseed.md). No Vercel secret is accepted in Omniform, plan data, state, evidence, logs, or browser code.

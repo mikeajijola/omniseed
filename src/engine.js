@@ -1,5 +1,5 @@
 import { compileCompany } from "./compiler.js";
-import { createPlan, definitionHash, verifyPlanHash } from "./planner.js";
+import { createConcretePlan, createPlan, definitionHash, verifyPlanHash } from "./planner.js";
 import { authorize, EngineError, OperationRegistry } from "./operations.js";
 import { providerGap } from "./provider.js";
 import { CapabilityResolver } from "./resolver.js";
@@ -9,13 +9,39 @@ export class OmniSeed {
   async inspect(declaration) {
     const state = await this.store.load(declaration.metadata.id);
     const resolutions = this.resolver.resolveCompany({ declaration, currentState: state, providerRegistry: this.providers });
-    return compileCompany(declaration, state, { providerRegistry: this.providers, resolutions, operationRegistry: this.operations });
+    const registry = compileCompany(declaration, state, { providerRegistry: this.providers, resolutions, operationRegistry: this.operations });
+    return { ...registry, definition: { apiVersion: declaration.apiVersion, hash: definitionHash(declaration) }, runtime: { version: "1.0.0-alpha.3", stateVersion: state.version } };
+  }
+  async snapshot(declaration) {
+    const state = await this.store.load(declaration.metadata.id), registry = await this.inspect(declaration);
+    return { ...registry, providerMap: declaration.spec.providers, activity: state.history, lily: { operationalIdentity: "company_steward", displayName: "Lily", companyId: declaration.metadata.id, status: "ready" } };
   }
   async plan(declaration, authorization) {
     authorize(authorization, ["plan.create"]);
     const state = await this.store.load(declaration.metadata.id);
     const resolutions = this.resolver.resolveCompany({ declaration, currentState: state, providerRegistry: this.providers });
-    const plan = createPlan(declaration, state, resolutions);
+    const draft = createPlan(declaration, state, resolutions);
+    const actions = [];
+    for (const action of draft.actions) {
+      const status = this.providers.statusForDesired(action.family, action.provider);
+      if (status.state !== "healthy") { actions.push(action); continue; }
+      const providerPlan = await this.providers.require(action.provider).plan(action);
+      actions.push({ ...action, ...(providerPlan.actionPatch ?? {}) });
+    }
+    const plan = createConcretePlan(declaration, state, actions, { gaps: draft.gaps, providerGaps: draft.providerGaps });
+    return this.#persistPlan(state, plan, authorization);
+  }
+  async planActions(declaration, actions, authorization) {
+    authorize(authorization, ["plan.create"]);
+    const state = await this.store.load(declaration.metadata.id), planned = [];
+    for (const action of actions) {
+      const provider = this.providers.require(action.provider);
+      const providerPlan = await provider.plan(action);
+      planned.push({ ...action, ...(providerPlan.actionPatch ?? {}) });
+    }
+    return this.#persistPlan(state, createConcretePlan(declaration, state, planned), authorization);
+  }
+  async #persistPlan(state, plan, authorization) {
     const next = await this.store.save({ ...state, plans: [...state.plans, plan], history: [...state.history, { type: "plan_generated", planId: plan.id, actorId: authorization.actorId, at: plan.createdAt }] }, state.version);
     if (next.version !== plan.stateVersion) throw new Error("Plan persistence version invariant failed");
     return plan;
@@ -39,7 +65,7 @@ export class OmniSeed {
     if (!(approval.permissions ?? []).includes("plan.approve")) throw new EngineError("approval_invalid", "Approval lacks plan.approve authorization context");
     const allowed = new Set(approval.approvedActionIds);
     if ([...allowed].some(id => !plan.actions.some(action => action.id === id))) throw new EngineError("approval_invalid", "Approval contains an unknown action");
-    const deployed = [...state.deployed], observed = [...state.observed], evidence = [...state.evidence], results = [];
+    let deployed = [...state.deployed], observed = [...state.observed], evidence = [...state.evidence]; const results = [];
     for (const action of plan.actions.filter(item => allowed.has(item.id))) {
       const status = this.providers.statusForDesired(action.family, action.provider);
       if (status.state !== "healthy") throw new EngineError("provider_unavailable", `Provider ${action.provider} is ${status.state}`, status);
@@ -49,9 +75,10 @@ export class OmniSeed {
       await provider.plan(action);
       const resource = await provider.apply(action);
       const deployment = { family: action.family, id: action.resourceId, provider: action.provider, desired: action.desired, ...resource };
-      deployed.push(deployment);
+      deployed = upsert(deployed, deployment);
       const observation = { family: action.family, id: action.resourceId, ...(await provider.observe(deployment)) };
-      observed.push(observation);
+      observed = upsert(observed, observation);
+      evidence = evidence.filter(item => !(item.family === action.family && item.resourceId === action.resourceId));
       evidence.push(...observation.evidence.map(item => ({ ...item, family: action.family, resourceId: action.resourceId, observedAt: observation.checkedAt })));
       results.push({ action, deployment, observation });
     }
@@ -82,10 +109,12 @@ function verifyStoredPlan(stored, supplied) {
   if (!stored) throw stale("Plan does not exist in company state");
   if (!verifyPlanHash(supplied) || stored.hash !== supplied.hash || JSON.stringify(stored) !== JSON.stringify(supplied)) throw stale("Plan differs from the persisted reviewed plan");
 }
+function upsert(items, value) { return [...items.filter(item => !(item.family === value.family && item.id === value.id)), value]; }
 const stale = (message = "Definition or runtime state changed after plan review") => new EngineError("plan_stale", message);
 function defaultOperations() {
   return new OperationRegistry()
     .register("get_capability", async (input, context) => context.registry.capabilities.find(item => item.id === input.capabilityId) ?? null)
+    .register("get_company_identity", async (_input, context) => ({ company: context.registry.company, definition: context.registry.definition, runtime: context.registry.runtime }))
     .register("generate_plan", async (_input, context) => context.engine.plan(context.declaration, context.authorization))
     .register("apply_plan", async (input, context) => context.engine.apply(context.declaration, input.plan, input.approval, context.authorization))
     .register("search_company", async (input, context) => {
