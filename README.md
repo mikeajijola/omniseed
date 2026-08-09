@@ -20,3 +20,7 @@ The generated capability registry is the sole executable projection consumed by 
 Run `node examples/customer-support.mjs` for the Generation 1 acceptance scenario with all reference providers and with the Connector Provider deliberately absent.
 
 Distribution consumes the versioned `@omniseed/omniform` package. A sibling checkout may be linked for development, but is not a production topology. Licensing remains unresolved and this package declares no license metadata.
+
+OmniSeed accepts canonical Omniform objects loaded from either YAML or JSON; runtime logic is serialization-neutral. `company_search` routes governed indexing and retrieval through an explicitly registered provider. The included `LocalCompanySearchProvider` is deterministic, isolated by company ID, and intended only for local development/tests. turbopuffer is a possible future adapter—not an OmniSeed dependency.
+
+Company Search results use a provider-neutral shape with provenance, source, capability/evidence references, optional relevance, timestamps and metadata. Search is never authoritative for definitions, provider IDs, plans, approvals, permissions, state versions, applies, or evidence metadata.

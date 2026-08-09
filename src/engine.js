@@ -1,6 +1,7 @@
 import { compileCompany } from "./compiler.js";
 import { createPlan, definitionHash, verifyPlanHash } from "./planner.js";
 import { authorize, EngineError, OperationRegistry } from "./operations.js";
+import { providerGap } from "./provider.js";
 import { CapabilityResolver } from "./resolver.js";
 
 export class OmniSeed {
@@ -67,6 +68,14 @@ export class OmniSeed {
     await this.store.save({ ...state, observed, history: [...state.history, { type: "reconciled", actorId: authorization.actorId, at: new Date().toISOString() }] }, state.version);
     return this.inspect(declaration);
   }
+  async invokeOperation(declaration, operationId, input, authorization) {
+    const operation = declaration.spec.operations.find(item => item.id === operationId);
+    if (!operation) throw new EngineError("operation_undeclared", `Operation is not declared: ${operationId}`);
+    const registry = await this.inspect(declaration);
+    const executable = registry.operations.find(item => item.id === operationId);
+    if (executable.currentAvailability !== "available") throw new EngineError(executable.currentAvailability, `Operation is ${executable.currentAvailability}`, { operation: executable, providerGaps: registry.providerGaps });
+    return this.operations.invoke(operation, input, { authorization, engine: this, declaration, registry });
+  }
 }
 
 function verifyStoredPlan(stored, supplied) {
@@ -74,4 +83,17 @@ function verifyStoredPlan(stored, supplied) {
   if (!verifyPlanHash(supplied) || stored.hash !== supplied.hash || JSON.stringify(stored) !== JSON.stringify(supplied)) throw stale("Plan differs from the persisted reviewed plan");
 }
 const stale = (message = "Definition or runtime state changed after plan review") => new EngineError("plan_stale", message);
-function defaultOperations() { return new OperationRegistry().register("get_capability", async input => input).register("generate_plan", async input => input).register("apply_plan", async input => input); }
+function defaultOperations() {
+  return new OperationRegistry()
+    .register("get_capability", async (input, context) => context.registry.capabilities.find(item => item.id === input.capabilityId) ?? null)
+    .register("generate_plan", async (_input, context) => context.engine.plan(context.declaration, context.authorization))
+    .register("apply_plan", async (input, context) => context.engine.apply(context.declaration, input.plan, input.approval, context.authorization))
+    .register("search_company", async (input, context) => {
+      const selected = context.declaration.spec.providers.company_search?.provider;
+      const status = context.engine.providers.statusForDesired("company_search", selected);
+      if (status.state !== "healthy") throw new EngineError("provider_unavailable", "Company Search provider is unavailable", providerGap("company_search", selected, status.state));
+      const provider = context.engine.providers.require(selected);
+      if (typeof provider.search !== "function") throw new EngineError("provider_unavailable", "Registered provider does not implement Company Search");
+      return provider.search({ ...input, companyId: context.declaration.metadata.id });
+    });
+}
