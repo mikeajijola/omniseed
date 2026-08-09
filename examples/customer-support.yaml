@@ -1,0 +1,20 @@
+apiVersion: omniform.org/v1alpha1
+kind: Company
+metadata: { id: customer_support_company, name: Customer Support Company }
+spec:
+  providers:
+    agents: { provider: reference_agents }
+    connectors: { provider: reference_connectors }
+    workflows: { provider: reference_workflows }
+  capabilities:
+    - id: customer_support
+      name: Customer Support
+      requires:
+        - { id: receive_request, primitiveFamily: connectors }
+        - { id: understand_request, primitiveFamily: agents }
+        - { id: access_context, primitiveFamily: connectors }
+        - { id: communicate_response, primitiveFamily: connectors }
+  operations:
+    - { id: get_capability, capability: customer_support, description: Get capability, input: {}, output: {}, mutation: false, permissions: [capability.read], approval: none, interfaces: [lily, api] }
+    - { id: generate_plan, capability: customer_support, description: Generate plan, input: {}, output: {}, mutation: false, permissions: [plan.create], approval: none, interfaces: [lily, api] }
+    - { id: apply_plan, capability: customer_support, description: Apply plan, input: {}, output: {}, mutation: true, permissions: [plan.apply], approval: required, interfaces: [api] }
