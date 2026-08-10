@@ -62,6 +62,8 @@ A Provider says:
 
 > Vercel can host one.
 
+Vercel is only one possible realisation. Another Provider could satisfy the same need.
+
 OmniSeed makes a plan:
 
 > Create or adopt the project and deploy the site.
@@ -98,9 +100,9 @@ OmniSeed itself is a Company-as-Code company. Its own Omniform should be public.
 
 When there is a reasonable choice, the OmniSeed company should prefer an option that is visible, understandable, easy to inspect, and easy to contribute to.
 
-For example, GitHub Actions may be a good Workflow Provider for OmniSeed because contributors can see the workflow beside the code.
+For example, the OmniSeed company may choose GitHub Actions as its Workflow Provider because contributors can see the workflows beside the code.
 
-This is a preference for the OmniSeed company's own implementation. It is not a rule for other companies.
+This is one example of a dogfood choice for the OmniSeed company's own implementation. It is not part of the universal model or a rule for other companies.
 
 Omniform and OmniSeed must remain Provider-neutral.
 
