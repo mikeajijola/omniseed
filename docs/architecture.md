@@ -33,3 +33,9 @@ The CLI supports validate, inspect, plan and reconcile. Apply is intentionally n
 Company Search results use a Provider-neutral shape. Results retain provenance, source, Capability and evidence references, optional relevance, timestamps, and metadata. Search does not own definitions, Provider identity, plans, approvals, permissions, state versions, applies, or evidence metadata.
 
 Distribution consumes the versioned `@omniseed/omniform` package. OmniSeed OS consumes the versioned `@omniseed/engine` package. Sibling links are a development convenience only.
+
+## Provider execution boundary
+
+`ProviderRegistry` normalizes every implementation to one Provider handle. Existing JavaScript objects use `InProcessProviderHandle`. External implementations use `ProtocolProviderHandle` and a separate transport. The compiler, resolver, planner, engine lifecycle, store, and reconciliation do not branch on Provider language or transport.
+
+Provider Protocol v1 is identified by `omniseed.provider.protocol/1.0`. Its first transport is newline-delimited JSON-RPC 2.0 over stdin/stdout. See [`provider-protocol-v1.md`](provider-protocol-v1.md) for the wire contract and authority boundary.

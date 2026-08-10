@@ -50,6 +50,7 @@ This is a preference for running the OmniSeed project. Never turn it into a rest
 - Keep Company Search scoped to one company. Keep the source attached to each result.
 - Do not put UI rendering, Lily wording, HTTP routes, or Omniform schema ownership here.
 - Keep vendor code behind a replaceable Provider boundary.
+- Keep in-process and protocol Providers behind the same normalized handle. Engine lifecycle code must not branch on implementation language or transport.
 
 [Omniform](https://github.com/mikeajijola/omniform) owns the company file. [OmniSeed OS](https://github.com/mikeajijola/omniseedos) owns the per-company experience. Never import OS code into the engine.
 

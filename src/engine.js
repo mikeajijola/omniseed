@@ -93,7 +93,7 @@ function defaultOperations() {
       const status = context.engine.providers.statusForDesired("company_search", selected);
       if (status.state !== "healthy") throw new EngineError("provider_unavailable", "Company Search provider is unavailable", providerGap("company_search", selected, status.state));
       const provider = context.engine.providers.require(selected);
-      if (typeof provider.search !== "function") throw new EngineError("provider_unavailable", "Registered provider does not implement Company Search");
-      return provider.search({ ...input, companyId: context.declaration.metadata.id });
+      try { return await provider.invoke("search", { ...input, companyId: context.declaration.metadata.id }, context.authorization); }
+      catch (error) { throw new EngineError("provider_unavailable", `Registered provider cannot search Company content: ${error.message}`); }
     });
 }
