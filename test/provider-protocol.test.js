@@ -9,6 +9,7 @@ const python = process.env.PYTHON ?? "python3";
 const script = fileURLToPath(new URL("../examples/providers/python_reference_provider.py", import.meta.url));
 const owner = { actorId: "owner", permissions: ["plan.create", "plan.approve", "plan.apply", "state.reconcile"] };
 const pythonAvailable = spawnSync(python, ["--version"], { encoding: "utf8" }).status === 0;
+if (!pythonAvailable) throw new Error(`Python 3 is required to prove the language-independent Provider Protocol (command: ${python})`);
 
 const declaration = parseOmniform(`apiVersion: omniform.org/v1alpha1
 kind: Company
