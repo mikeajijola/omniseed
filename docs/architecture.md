@@ -2,6 +2,16 @@
 
 The control loop is `load → compile → diff → plan → approve → apply → observe → persist → compile`.
 
+## Repository map
+
+- `compiler.js` combines Omniform and saved state into the current company registry.
+- `resolver.js` finds candidate ways to cover unmet requirements.
+- `provider.js` owns Provider registration, status, and adapter contracts.
+- `planner.js` creates actions and stable company and plan hashes.
+- `operations.js` owns handlers, permissions, approvals, dependencies, and authorization.
+- `store.js` keeps deployed resources, observations, evidence, history, and plans separate.
+- `engine.js` joins these parts and controls access to Provider side effects.
+
 Provider adapters are explicitly registered and advertise primitive families and capability offerings. Desired, installed, configured, connected and healthy are distinct. The resolver moves from requirements and current coverage to candidate realisations; exact resources in Omniform are optional constraints.
 
 A concrete plan binds every action to the provider selected for its family. Plans are persisted and content-hashed. Actor-scoped approval names the exact plan hash and selected action IDs. Definition and state-version checks prevent approval reuse against a different reality.

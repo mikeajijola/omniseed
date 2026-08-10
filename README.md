@@ -8,6 +8,8 @@ Writing down a company is not enough.
 
 Something has to make it real.
 
+A written company should be able to become a working company.
+
 OmniSeed reads the company's Omniform. It works out:
 
 - what the company needs
@@ -23,6 +25,8 @@ Important changes can require approval. The approval is tied to the exact plan t
 After approval, OmniSeed asks the chosen Providers to do the work. Then it checks the real world to see whether the work actually succeeded.
 
 It never treats “we asked for it” as “it exists.”
+
+Over time, more of this work can happen automatically when the company has given permission. People, software, AI agents, services, and machines can all help do the work.
 
 ## How it fits
 
@@ -84,19 +88,19 @@ It owns:
 
 OmniSeed does not own the Omniform language. It does not own the browser experience or Lily's conversation design.
 
-Providers must stay replaceable. Search is one Provider type. It helps find knowledge, but it is not the source of truth about the company.
+Providers must stay replaceable. Company Search is one part of a company. The company can choose which Search Provider supplies it. Search helps find knowledge, but it is not the source of truth about the company.
 
 ## OmniSeed tries to run itself in the open
 
-OmniSeed itself is a Company-as-Code company.
+If OmniSeed says a company can be code, people should be able to open our repositories and see how OmniSeed itself runs.
 
-Its own Omniform should be public. Its workflows should be visible where practical. Its plans, docs, issues, code, and company structure should be understandable by contributors.
+OmniSeed itself is a Company-as-Code company. Its own Omniform should be public. Its workflows should be visible where practical. Its plans, docs, issues, code, and company structure should be understandable by contributors.
 
-When several Providers are good enough, the OmniSeed project should prefer one that makes its work easier to inspect, understand, and contribute to.
+When there is a reasonable choice, the OmniSeed company should prefer an option that is visible, understandable, easy to inspect, and easy to contribute to.
 
 For example, GitHub Actions may be a good Workflow Provider for OmniSeed because contributors can see the workflow beside the code.
 
-This is a dogfood preference for the OmniSeed project. It is not a rule for companies that use OmniSeed.
+This is a preference for the OmniSeed company's own implementation. It is not a rule for other companies.
 
 Omniform and OmniSeed must remain Provider-neutral.
 
@@ -112,17 +116,11 @@ npx omniseed inspect ../omniform/examples/company.omniform.yaml
 npx omniseed plan ../omniform/examples/company.omniform.yaml
 ```
 
-State is stored in `.omniseed/state.json` by default.
-
-The command line does not offer a quick apply command. Applying work needs the saved plan, its exact approval, and the right permissions. Use the software library or a trusted service for that flow.
-
 ## For developers
 
-Read [`docs/architecture.md`](docs/architecture.md) for the full control loop, Provider states, plan hashes, approval checks, stored state, operation availability, and Company Search rules.
+Read [`docs/architecture.md`](docs/architecture.md) for saved state, the full plan and approval rules, Provider states, operation checks, Company Search, and package details.
 
 See [`examples/customer-support.mjs`](examples/customer-support.mjs) for a working example.
-
-OmniSeed consumes the versioned `@omniseed/omniform` package. OmniSeed OS consumes the versioned `@omniseed/engine` package. Sibling folders are useful during development, but production does not depend on that folder layout.
 
 ## Project status
 
