@@ -1,11 +1,42 @@
 const providerStates = ["implementation_available", "configured", "connected", "healthy"];
 
+/** Normalized boundary for existing in-process Provider objects. */
+export class InProcessProviderHandle {
+  constructor(provider) {
+    if (!provider?.metadata?.id) throw new Error("Provider implementation requires metadata.id");
+    this.provider = provider;
+    this.metadata = provider.metadata;
+    this.status = provider.status;
+    this.kind = "in_process";
+  }
+  async validate(action) { return this.provider.validate(action); }
+  async plan(action) { return this.provider.plan(action); }
+  async apply(action) { return this.provider.apply(action); }
+  async observe(resource) { return this.provider.observe(resource); }
+  async invoke(operation, input, actor) {
+    if (typeof this.provider.invoke === "function") return this.provider.invoke(operation, input, actor);
+    const handler = this.provider[operation];
+    if (typeof handler !== "function") throw new Error(`Provider does not implement operation: ${operation}`);
+    return handler.call(this.provider, input, actor);
+  }
+  async index(input, actor) { return this.invoke("index", input, actor); }
+  async update(input, actor) { return this.invoke("update", input, actor); }
+  async remove(input, actor) { return this.invoke("remove", input, actor); }
+  async search(input, actor) { return this.invoke("search", input, actor); }
+  async retrieve(input, actor) { return this.invoke("retrieve", input, actor); }
+  async shutdown() { if (typeof this.provider.shutdown === "function") await this.provider.shutdown(); }
+}
+
+export function providerHandle(provider) {
+  return provider?.providerHandle === true ? provider : new InProcessProviderHandle(provider);
+}
+
 export class ProviderRegistry {
   #providers = new Map();
   register(provider) {
-    if (!provider?.metadata?.id) throw new Error("Provider implementation requires metadata.id");
-    if (this.#providers.has(provider.metadata.id)) throw new Error(`Provider already registered: ${provider.metadata.id}`);
-    this.#providers.set(provider.metadata.id, provider);
+    const handle = providerHandle(provider);
+    if (this.#providers.has(handle.metadata.id)) throw new Error(`Provider already registered: ${handle.metadata.id}`);
+    this.#providers.set(handle.metadata.id, handle);
     return this;
   }
   get(id) { return this.#providers.get(id) ?? null; }

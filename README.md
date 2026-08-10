@@ -124,6 +124,8 @@ Read [`docs/architecture.md`](docs/architecture.md) for saved state, the full pl
 
 See [`examples/customer-support.mjs`](examples/customer-support.mjs) for a working example.
 
+Providers may run inside Node.js or in a separate process through the language-neutral Provider Protocol. The Python reference Provider proves that the engine lifecycle does not depend on Provider implementation language. See [`docs/provider-protocol-v1.md`](docs/provider-protocol-v1.md).
+
 ## Project status
 
 OmniSeed is in Generation 1 and early development.

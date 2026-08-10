@@ -5,3 +5,5 @@ export * from "./provider.js";
 export * from "./resolver.js";
 export * from "./operations.js";
 export * from "./store.js";
+export * from "./provider-protocol.js";
+export * from "./transports/stdio-json-rpc.js";
