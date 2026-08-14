@@ -90,6 +90,8 @@ It owns:
 
 OmniSeed does not own the Omniform language. It does not own the browser experience or Lily's conversation design.
 
+OmniSeed also governs changes to the company definition itself. A **Realisation Plan** changes reality to match the current definition. A **Company Change Proposal** proposes changing that definition. Semantic systems such as Lily may create a proposal and explain its evidence, but they cannot directly edit canonical Omniform or bypass separate approval and apply authority. See [`docs/company-change.md`](docs/company-change.md).
+
 Providers must stay replaceable. Company Search is one part of a company. The company can choose which Search Provider supplies it. Search helps find knowledge, but it is not the source of truth about the company.
 
 ## OmniSeed tries to run itself in the open

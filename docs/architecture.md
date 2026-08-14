@@ -10,6 +10,7 @@ The control loop is `load → compile → diff → plan → approve → apply �
 - `planner.js` creates actions and stable company and plan hashes.
 - `operations.js` owns handlers, permissions, approvals, dependencies, and authorization.
 - `store.js` keeps deployed resources, observations, evidence, history, and plans separate.
+- `company-change.js` owns deterministic definition patches, proposal hashing, candidate validation, evidence references, and preview impact.
 - `engine.js` joins these parts and controls access to Provider side effects.
 
 Provider adapters are explicitly registered and advertise primitive families and capability offerings. Desired, installed, configured, connected and healthy are distinct. The resolver moves from requirements and current coverage to candidate realisations; exact resources in Omniform are optional constraints.
@@ -17,6 +18,8 @@ Provider adapters are explicitly registered and advertise primitive families and
 A concrete plan binds every action to the provider selected for its family. Plans are persisted and content-hashed. Actor-scoped approval names the exact plan hash and selected action IDs. Definition and state-version checks prevent approval reuse against a different reality.
 
 Semantic systems may propose Omniform or a realisation, but only this deterministic path mutates resources. Desired declarations, deployed resources, observations, evidence and history are stored as distinct records.
+
+Company Change Proposals are persisted separately from Provider execution plans. Their approval binds an exact proposal hash and their base definition hash rejects stale changes. Applied candidates become the store-backed canonical definition, are recompiled, and expose ordinary realisation gaps. They never create resources or call Providers. See [`company-change.md`](company-change.md).
 
 Declared operations compile into an executable registry containing implementation, permission, mutation, approval, provider dependency and availability truth. Declaration alone never makes an operation executable.
 

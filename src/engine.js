@@ -3,19 +3,22 @@ import { createPlan, definitionHash, verifyPlanHash } from "./planner.js";
 import { authorize, EngineError, OperationRegistry } from "./operations.js";
 import { providerGap } from "./provider.js";
 import { CapabilityResolver } from "./resolver.js";
+import { applyDefinitionPatch, createCompanyChangeProposal, previewCompanyChange, verifyCompanyChangeProposal } from "./company-change.js";
 
 export class OmniSeed {
   constructor({ store, providers, resolver = new CapabilityResolver(), operations = defaultOperations() }) { this.store = store; this.providers = providers; this.resolver = resolver; this.operations = operations; }
   async inspect(declaration) {
     const state = await this.store.load(declaration.metadata.id);
-    const resolutions = this.resolver.resolveCompany({ declaration, currentState: state, providerRegistry: this.providers });
-    return compileCompany(declaration, state, { providerRegistry: this.providers, resolutions, operationRegistry: this.operations });
+    const active = activeDeclaration(declaration, state);
+    const resolutions = this.resolver.resolveCompany({ declaration: active, currentState: state, providerRegistry: this.providers });
+    return { ...compileCompany(active, state, { providerRegistry: this.providers, resolutions, operationRegistry: this.operations }), definitionHash: definitionHash(active) };
   }
   async plan(declaration, authorization) {
     authorize(authorization, ["plan.create"]);
     const state = await this.store.load(declaration.metadata.id);
-    const resolutions = this.resolver.resolveCompany({ declaration, currentState: state, providerRegistry: this.providers });
-    const plan = createPlan(declaration, state, resolutions);
+    const active = activeDeclaration(declaration, state);
+    const resolutions = this.resolver.resolveCompany({ declaration: active, currentState: state, providerRegistry: this.providers });
+    const plan = createPlan(active, state, resolutions);
     const next = await this.store.save({ ...state, plans: [...state.plans, plan], history: [...state.history, { type: "plan_generated", planId: plan.id, actorId: authorization.actorId, at: plan.createdAt }] }, state.version);
     if (next.version !== plan.stateVersion) throw new Error("Plan persistence version invariant failed");
     return plan;
@@ -32,7 +35,8 @@ export class OmniSeed {
   async apply(declaration, plan, approval, authorization) {
     authorize(authorization, ["plan.apply"]);
     const state = await this.store.load(declaration.metadata.id);
-    if (state.version !== plan.stateVersion || definitionHash(declaration) !== plan.definitionHash) throw stale();
+    const active = activeDeclaration(declaration, state);
+    if (state.version !== plan.stateVersion || definitionHash(active) !== plan.definitionHash) throw stale();
     const stored = state.plans.find(item => item.id === plan.id);
     verifyStoredPlan(stored, plan);
     if (!approval || approval.planId !== plan.id || approval.planHash !== plan.hash || approval.actorId !== authorization.actorId) throw new EngineError("approval_invalid", "Approval does not bind this actor to the reviewed plan");
@@ -56,7 +60,7 @@ export class OmniSeed {
       results.push({ action, deployment, observation });
     }
     const next = await this.store.save({ ...state, deployed, observed, evidence, plans: state.plans.map(item => item.id === plan.id ? { ...item, status: "applied", appliedActionIds: [...allowed] } : item), history: [...state.history, { type: "plan_applied", planId: plan.id, actorId: authorization.actorId, at: new Date().toISOString(), actionIds: [...allowed] }] }, state.version);
-    return { plan: { ...plan, status: "applied", appliedActionIds: [...allowed] }, state: next, registry: await this.inspect(declaration), results };
+    return { plan: { ...plan, status: "applied", appliedActionIds: [...allowed] }, state: next, registry: await this.inspect(active), results };
   }
   async reconcile(declaration, authorization) {
     authorize(authorization, ["state.reconcile"]);
@@ -68,13 +72,75 @@ export class OmniSeed {
     await this.store.save({ ...state, observed, history: [...state.history, { type: "reconciled", actorId: authorization.actorId, at: new Date().toISOString() }] }, state.version);
     return this.inspect(declaration);
   }
+  async proposeCompanyChange(declaration, request, authorization) {
+    authorize(authorization, ["company_change.propose"]);
+    const state = await this.store.load(declaration.metadata.id), active = activeDeclaration(declaration, state);
+    const proposal = createCompanyChangeProposal({ declaration: active, request, actor: authorization, evidence: state.evidence });
+    if ((state.companyChanges ?? []).some(item => item.id === proposal.id)) throw new EngineError("company_change_conflict", `Proposal already exists: ${proposal.id}`);
+    await this.store.save({ ...state, companyChanges: [...(state.companyChanges ?? []), proposal], history: [...state.history, { type: "company_change_proposed", proposalId: proposal.id, proposalHash: proposal.hash, actorId: authorization.actorId, evidence: proposal.evidence, at: proposal.createdAt }] }, state.version);
+    return proposal;
+  }
+  async listCompanyChangeProposals(declaration, authorization) {
+    authorize(authorization, ["company_change.read"]);
+    const state = await this.store.load(declaration.metadata.id);
+    return structuredClone(state.companyChanges ?? []);
+  }
+  async getCompanyChangeProposal(declaration, proposalId, authorization) {
+    authorize(authorization, ["company_change.read"]);
+    return structuredClone(requireProposal(await this.store.load(declaration.metadata.id), proposalId));
+  }
+  async previewCompanyChange(declaration, proposalId, authorization) {
+    authorize(authorization, ["company_change.read"]);
+    const state = await this.store.load(declaration.metadata.id), active = activeDeclaration(declaration, state), proposal = requireProposal(state, proposalId);
+    return previewCompanyChange({ declaration: active, proposal, compile: candidate => {
+      const resolutions = this.resolver.resolveCompany({ declaration: candidate, currentState: state, providerRegistry: this.providers });
+      return compileCompany(candidate, state, { providerRegistry: this.providers, resolutions, operationRegistry: this.operations });
+    } });
+  }
+  async approveCompanyChange(declaration, proposalId, proposalHash, authorization) {
+    authorize(authorization, ["company_change.approve"]);
+    const state = await this.store.load(declaration.metadata.id), active = activeDeclaration(declaration, state), proposal = requireProposal(state, proposalId);
+    if (proposal.status !== "proposed") throw new EngineError("company_change_invalid_state", `Only proposed changes can be approved; found ${proposal.status}`);
+    if (!verifyCompanyChangeProposal(proposal) || proposal.hash !== proposalHash) throw new EngineError("approval_invalid", "Approval does not bind the exact persisted proposal");
+    if (definitionHash(active) !== proposal.baseDefinitionHash) return this.#markCompanyChangeStale(state, proposal, authorization, definitionHash(active));
+    const approval = { proposalId, proposalHash, actorId: authorization.actorId, permissions: [...authorization.permissions], approvedAt: new Date().toISOString() };
+    const approved = { ...proposal, status: "approved", approval };
+    await this.store.save({ ...state, companyChanges: replaceProposal(state, approved), history: [...state.history, { type: "company_change_approved", proposalId, proposalHash, actorId: authorization.actorId, at: approval.approvedAt }] }, state.version);
+    return approval;
+  }
+  async rejectCompanyChange(declaration, proposalId, reason, authorization) {
+    authorize(authorization, ["company_change.reject"]);
+    const state = await this.store.load(declaration.metadata.id), proposal = requireProposal(state, proposalId);
+    if (!["proposed", "approved"].includes(proposal.status)) throw new EngineError("company_change_invalid_state", `Cannot reject a ${proposal.status} proposal`);
+    const rejectedAt = new Date().toISOString(), rejected = { ...proposal, status: "rejected", rejection: { actorId: authorization.actorId, reason: String(reason ?? "").trim(), rejectedAt } };
+    await this.store.save({ ...state, companyChanges: replaceProposal(state, rejected), history: [...state.history, { type: "company_change_rejected", proposalId, actorId: authorization.actorId, reason: rejected.rejection.reason, at: rejectedAt }] }, state.version);
+    return rejected;
+  }
+  async applyCompanyChange(declaration, proposalId, authorization) {
+    authorize(authorization, ["company_change.apply"]);
+    const state = await this.store.load(declaration.metadata.id), active = activeDeclaration(declaration, state), proposal = requireProposal(state, proposalId);
+    if (proposal.status !== "approved") throw new EngineError("company_change_invalid_state", `Only approved changes can be applied; found ${proposal.status}`);
+    if (!verifyCompanyChangeProposal(proposal) || proposal.approval?.proposalHash !== proposal.hash || !(proposal.approval?.permissions ?? []).includes("company_change.approve")) throw new EngineError("approval_invalid", "Stored approval does not bind the exact persisted proposal");
+    if (definitionHash(active) !== proposal.baseDefinitionHash) return this.#markCompanyChangeStale(state, proposal, authorization, definitionHash(active));
+    const candidate = applyDefinitionPatch(active, proposal.patch), resultingDefinitionHash = definitionHash(candidate);
+    if (resultingDefinitionHash !== proposal.proposedDefinitionHash) throw new EngineError("company_change_tampered", "Applied result differs from the reviewed candidate definition");
+    const appliedAt = new Date().toISOString(), appliedProposal = { ...proposal, status: "applied", resultingDefinitionHash, appliedAt, appliedBy: { actorId: authorization.actorId } };
+    const next = await this.store.save({ ...state, canonicalDefinition: candidate, companyChanges: replaceProposal(state, appliedProposal), history: [...state.history, { type: "company_change_applied", proposalId, proposalHash: proposal.hash, actorId: authorization.actorId, baseDefinitionHash: proposal.baseDefinitionHash, resultingDefinitionHash, at: appliedAt }] }, state.version);
+    return { proposal: appliedProposal, declaration: candidate, state: next, registry: await this.inspect(candidate) };
+  }
+  async #markCompanyChangeStale(state, proposal, authorization, actualDefinitionHash) {
+    const staleAt = new Date().toISOString(), changed = { ...proposal, status: "stale", staleAt };
+    await this.store.save({ ...state, companyChanges: replaceProposal(state, changed), history: [...state.history, { type: "company_change_stale", proposalId: proposal.id, actorId: authorization.actorId, at: staleAt }] }, state.version);
+    throw new EngineError("company_change_stale", "Company definition changed after the proposal was created", { expected: proposal.baseDefinitionHash, actual: actualDefinitionHash });
+  }
   async invokeOperation(declaration, operationId, input, authorization) {
-    const operation = declaration.spec.operations.find(item => item.id === operationId);
+    const state = await this.store.load(declaration.metadata.id), active = activeDeclaration(declaration, state);
+    const operation = active.spec.operations.find(item => item.id === operationId);
     if (!operation) throw new EngineError("operation_undeclared", `Operation is not declared: ${operationId}`);
-    const registry = await this.inspect(declaration);
+    const registry = await this.inspect(active);
     const executable = registry.operations.find(item => item.id === operationId);
     if (executable.currentAvailability !== "available") throw new EngineError(executable.currentAvailability, `Operation is ${executable.currentAvailability}`, { operation: executable, providerGaps: registry.providerGaps });
-    return this.operations.invoke(operation, input, { authorization, engine: this, declaration, registry });
+    return this.operations.invoke(operation, input, { authorization, engine: this, declaration: active, registry });
   }
 }
 
@@ -88,6 +154,11 @@ function defaultOperations() {
     .register("get_capability", async (input, context) => context.registry.capabilities.find(item => item.id === input.capabilityId) ?? null)
     .register("generate_plan", async (_input, context) => context.engine.plan(context.declaration, context.authorization))
     .register("apply_plan", async (input, context) => context.engine.apply(context.declaration, input.plan, input.approval, context.authorization))
+    .register("propose_company_change", async (input, context) => context.engine.proposeCompanyChange(context.declaration, input, context.authorization))
+    .register("inspect_company_change", async (input, context) => input?.proposalId ? context.engine.getCompanyChangeProposal(context.declaration, input.proposalId, context.authorization) : context.engine.listCompanyChangeProposals(context.declaration, context.authorization))
+    .register("approve_company_change", async (input, context) => context.engine.approveCompanyChange(context.declaration, input.proposalId, input.proposalHash, context.authorization))
+    .register("reject_company_change", async (input, context) => context.engine.rejectCompanyChange(context.declaration, input.proposalId, input.reason, context.authorization))
+    .register("apply_company_change", async (input, context) => context.engine.applyCompanyChange(context.declaration, input.proposalId, context.authorization))
     .register("search_company", async (input, context) => {
       const selected = context.declaration.spec.providers.company_search?.provider;
       const status = context.engine.providers.statusForDesired("company_search", selected);
@@ -97,3 +168,11 @@ function defaultOperations() {
       catch (error) { throw new EngineError("provider_unavailable", `Registered provider cannot search Company content: ${error.message}`); }
     });
 }
+
+function activeDeclaration(declaration, state) { return state?.canonicalDefinition ?? declaration; }
+function requireProposal(state, proposalId) {
+  const proposal = (state.companyChanges ?? []).find(item => item.id === proposalId);
+  if (!proposal) throw new EngineError("company_change_not_found", `Company change proposal does not exist: ${proposalId}`);
+  return proposal;
+}
+function replaceProposal(state, proposal) { return (state.companyChanges ?? []).map(item => item.id === proposal.id ? proposal : item); }
