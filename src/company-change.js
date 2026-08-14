@@ -26,7 +26,7 @@ export function createCompanyChangeProposal({ declaration, request, actor, evide
     alternatives: request.alternatives ?? [],
     assumptions: request.assumptions ?? [],
     risks: request.risks ?? [],
-    requiredAuthority: request.requiredAuthority ?? ["company_change.approve", "company_change.apply"]
+    requiredAuthority: normalizeRequiredAuthority(request.requiredAuthority)
   });
   const hash = hashValue(immutable);
   return { id: `ccp_${hash.slice(0, 16)}`, status: "proposed", hash, ...immutable };
@@ -124,6 +124,15 @@ function normalizeEvidenceReferences(references = [], evidence = []) {
   const missing = references.filter(reference => typeof reference !== "string" || !available.has(reference));
   if (missing.length) throw new EngineError("evidence_not_found", `Evidence references do not resolve: ${missing.join(", ")}`, { missing });
   return [...new Set(references)].sort().map(id => ({ id }));
+}
+
+function normalizeRequiredAuthority(authority) {
+  if (authority !== undefined && (!authority || typeof authority !== "object" || Array.isArray(authority))) throw invalid("requiredAuthority must contain approve and apply permission arrays");
+  const normalize = (value, baseline, field) => {
+    if (value !== undefined && (!Array.isArray(value) || value.some(permission => typeof permission !== "string" || !permission.trim()))) throw invalid(`requiredAuthority.${field} must be an array of permission strings`);
+    return [...new Set([baseline, ...(value ?? [])])].sort();
+  };
+  return { approve: normalize(authority?.approve, "company_change.approve", "approve"), apply: normalize(authority?.apply, "company_change.apply", "apply") };
 }
 
 function proposalImmutable(proposal) {

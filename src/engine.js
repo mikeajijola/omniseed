@@ -98,8 +98,8 @@ export class OmniSeed {
     } });
   }
   async approveCompanyChange(declaration, proposalId, proposalHash, authorization) {
-    authorize(authorization, ["company_change.approve"]);
     const state = await this.store.load(declaration.metadata.id), active = activeDeclaration(declaration, state), proposal = requireProposal(state, proposalId);
+    authorize(authorization, proposal.requiredAuthority.approve);
     if (proposal.status !== "proposed") throw new EngineError("company_change_invalid_state", `Only proposed changes can be approved; found ${proposal.status}`);
     if (!verifyCompanyChangeProposal(proposal) || proposal.hash !== proposalHash) throw new EngineError("approval_invalid", "Approval does not bind the exact persisted proposal");
     if (definitionHash(active) !== proposal.baseDefinitionHash) return this.#markCompanyChangeStale(state, proposal, authorization, definitionHash(active));
@@ -117,10 +117,10 @@ export class OmniSeed {
     return rejected;
   }
   async applyCompanyChange(declaration, proposalId, authorization) {
-    authorize(authorization, ["company_change.apply"]);
     const state = await this.store.load(declaration.metadata.id), active = activeDeclaration(declaration, state), proposal = requireProposal(state, proposalId);
+    authorize(authorization, proposal.requiredAuthority.apply);
     if (proposal.status !== "approved") throw new EngineError("company_change_invalid_state", `Only approved changes can be applied; found ${proposal.status}`);
-    if (!verifyCompanyChangeProposal(proposal) || proposal.approval?.proposalHash !== proposal.hash || !(proposal.approval?.permissions ?? []).includes("company_change.approve")) throw new EngineError("approval_invalid", "Stored approval does not bind the exact persisted proposal");
+    if (!verifyCompanyChangeProposal(proposal) || proposal.approval?.proposalHash !== proposal.hash || proposal.requiredAuthority.approve.some(permission => !(proposal.approval?.permissions ?? []).includes(permission))) throw new EngineError("approval_invalid", "Stored approval does not bind the exact persisted proposal and its required approval authority");
     if (definitionHash(active) !== proposal.baseDefinitionHash) return this.#markCompanyChangeStale(state, proposal, authorization, definitionHash(active));
     const candidate = applyDefinitionPatch(active, proposal.patch), resultingDefinitionHash = definitionHash(candidate);
     if (resultingDefinitionHash !== proposal.proposedDefinitionHash) throw new EngineError("company_change_tampered", "Applied result differs from the reviewed candidate definition");

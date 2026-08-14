@@ -15,7 +15,7 @@ OmniSeed persists Company Change Proposals separately from realisation plans. A 
 - an exact proposal `hash` used by approval;
 - rationale in `reason`, separate resolvable `evidence` references, assumptions, alternatives, and risks;
 - inspectable target paths and a deterministic `patch`;
-- required authority, approval or rejection records, and resulting hash/application metadata.
+- required approval/apply permission sets, approval or rejection records, and resulting hash/application metadata.
 
 The patch is a deliberately narrow JSON Patch-compatible subset: `add`, `remove`, and `replace` operations using JSON Pointer paths. It operates on canonical parsed Omniform, never YAML text. Every candidate is validated by Omniform before persistence and again through exact deterministic application. Preview compiles current and candidate definitions without Provider side effects and reports added, changed, and removed capabilities, resources, and operations plus likely new gaps.
 
@@ -37,6 +37,8 @@ The engine uses the existing actor permission mechanism:
 - `company_change.apply`
 
 Approval binds the exact persisted proposal hash. Before approval and apply, OmniSeed compares the active definition hash with `baseDefinitionHash`; mismatch records `stale` and returns `company_change_stale`. It never rebases or regenerates a proposal during apply. Approval and apply are separate authorities and need not belong to the proposer.
+
+`requiredAuthority` is enforceable Generation 1 policy expressed through the existing permission model: `{ approve: string[], apply: string[] }`. OmniSeed always includes the baseline `company_change.approve` and `company_change.apply` permissions and deterministically enforces any additional proposal-specific permissions at the corresponding lifecycle transition.
 
 Authorisation is evaluated against the currently active company and permissions. A proposal that would weaken future governance cannot use that future governance to authorise itself.
 

@@ -83,6 +83,18 @@ test("approval binds the persisted proposal hash and rejection prevents apply", 
   await assert.rejects(rejectedSubject.applyCompanyChange(declaration, rejected.id, actors.human), error => error.code === "company_change_invalid_state");
 });
 
+test("proposal-specific required authority is hashed and enforced for approval and apply", async () => {
+  const subject = engine(stateWithEvidence());
+  const proposal = await subject.proposeCompanyChange(declaration, { ...request(), requiredAuthority: { approve: ["board.approve"], apply: ["release.apply"] } }, actors.lily);
+  assert.deepEqual(proposal.requiredAuthority, { approve: ["board.approve", "company_change.approve"], apply: ["company_change.apply", "release.apply"] });
+  await assert.rejects(subject.approveCompanyChange(declaration, proposal.id, proposal.hash, actors.human), error => error.code === "authorization_denied" && error.details.missing.includes("board.approve"));
+  const board = { ...actors.human, permissions: [...actors.human.permissions, "board.approve"] };
+  await subject.approveCompanyChange(declaration, proposal.id, proposal.hash, board);
+  await assert.rejects(subject.applyCompanyChange(declaration, proposal.id, actors.human), error => error.code === "authorization_denied" && error.details.missing.includes("release.apply"));
+  const release = { ...actors.human, permissions: [...actors.human.permissions, "release.apply"] };
+  assert.equal((await subject.applyCompanyChange(declaration, proposal.id, release)).proposal.status, "applied");
+});
+
 test("definition drift marks an approved proposal stale without rebasing", async () => {
   const subject = engine(stateWithEvidence());
   const proposal = await subject.proposeCompanyChange(declaration, request(), actors.lily);

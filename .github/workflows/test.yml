@@ -1,0 +1,36 @@
+name: OmniSeed tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out OmniSeed
+        uses: actions/checkout@v7
+        with:
+          path: omniseed
+      - name: Check out Omniform
+        uses: actions/checkout@v7
+        with:
+          repository: mikeajijola/omniform
+          path: omniform
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install Omniform dependencies
+        run: npm ci
+        working-directory: omniform
+      - name: Install engine test dependency
+        run: npm install --no-save --no-package-lock ../omniform
+        working-directory: omniseed
+      - name: Test
+        run: npm test
+        working-directory: omniseed
