@@ -5,12 +5,12 @@ import { CapabilityResolver } from "./resolver.js";
 import { applyDefinitionPatch, createCompanyChangeProposal, previewCompanyChange, verifyCompanyChangeProposal } from "./company-change.js";
 
 export class OmniSeed {
-  constructor({ store, providers, resolver = new CapabilityResolver(), operations = defaultOperations() }) { this.store = store; this.providers = providers; this.resolver = resolver; this.operations = operations; }
+  constructor({ store, providers, resolver = new CapabilityResolver(), operations = defaultOperations(), companyRepository = null, binding = {} }) { this.store = store; this.providers = providers; this.resolver = resolver; this.operations = operations; this.companyRepository = companyRepository; this.binding = binding; }
   async inspect(declaration) {
     const state = await this.store.load(declaration.metadata.id);
     const active = activeDeclaration(declaration, state);
     const resolutions = this.resolver.resolveCompany({ declaration: active, currentState: state, providerRegistry: this.providers });
-    return { ...compileCompany(active, state, { providerRegistry: this.providers, resolutions, operationRegistry: this.operations }), definitionHash: definitionHash(active) };
+    return { ...compileCompany(active, state, { providerRegistry: this.providers, resolutions, operationRegistry: this.operations, binding: this.binding }), definitionHash: definitionHash(active) };
   }
   async plan(declaration, authorization) {
     authorize(authorization, ["plan.create"]);
@@ -123,6 +123,13 @@ export class OmniSeed {
     if (definitionHash(active) !== proposal.baseDefinitionHash) return this.#markCompanyChangeStale(state, proposal, authorization, definitionHash(active));
     const candidate = applyDefinitionPatch(active, proposal.patch), resultingDefinitionHash = definitionHash(candidate);
     if (resultingDefinitionHash !== proposal.proposedDefinitionHash) throw new EngineError("company_change_tampered", "Applied result differs from the reviewed candidate definition");
+    if (active.spec.governance?.desiredState) {
+      if (!this.companyRepository) throw new EngineError("company_repository_unavailable", "Canonical Git company repository is not connected; approved desired state cannot be changed outside Git");
+      const submission = await this.companyRepository.submit({ authority: active.spec.governance.desiredState, declaration: active, candidate, proposal, authorization });
+      const submittedAt = new Date().toISOString(), submittedProposal = { ...proposal, status: "submitted", resultingDefinitionHash, submittedAt, submittedBy: { actorId: authorization.actorId }, submission };
+      const next = await this.store.save({ ...state, companyChanges: replaceProposal(state, submittedProposal), evidence: [...state.evidence, ...(submission.evidence ?? [])], history: [...state.history, { type: "company_change_submitted", proposalId, proposalHash: proposal.hash, actorId: authorization.actorId, branch: submission.branch, pullRequest: submission.pullRequest, at: submittedAt }] }, state.version);
+      return { proposal: submittedProposal, declaration: active, candidateDeclaration: candidate, state: next, registry: await this.inspect(active), submission };
+    }
     const appliedAt = new Date().toISOString(), appliedProposal = { ...proposal, status: "applied", resultingDefinitionHash, appliedAt, appliedBy: { actorId: authorization.actorId } };
     const next = await this.store.save({ ...state, canonicalDefinition: candidate, companyChanges: replaceProposal(state, appliedProposal), history: [...state.history, { type: "company_change_applied", proposalId, proposalHash: proposal.hash, actorId: authorization.actorId, baseDefinitionHash: proposal.baseDefinitionHash, resultingDefinitionHash, at: appliedAt }] }, state.version);
     return { proposal: appliedProposal, declaration: candidate, state: next, registry: await this.inspect(candidate) };
@@ -150,6 +157,7 @@ function verifyStoredPlan(stored, supplied) {
 const stale = (message = "Definition or runtime state changed after plan review") => new EngineError("plan_stale", message);
 function defaultOperations() {
   return new OperationRegistry()
+    .register("inspect_company", async (_input, context) => context.registry)
     .register("get_capability", async (input, context) => context.registry.capabilities.find(item => item.id === input.capabilityId) ?? null)
     .register("generate_plan", async (_input, context) => context.engine.plan(context.declaration, context.authorization))
     .register("apply_plan", async (input, context) => context.engine.apply(context.declaration, input.plan, input.approval, context.authorization))

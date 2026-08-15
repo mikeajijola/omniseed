@@ -1,5 +1,7 @@
 # OmniSeed
 
+An OmniSeed instance is a particular company definition, its desired state, governed history, realisations, Provider bindings, and observed state being managed and reconciled by OmniSeed. The company is the durable identity; the engine process, endpoint, deployment, and interfaces are replaceable.
+
 OmniSeed makes a company described in Omniform real.
 
 ## The idea

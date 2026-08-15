@@ -122,3 +122,27 @@ test("all-provider scenario reaches realised after reviewed plan", async () => {
   assert.equal(result.registry.capabilities[0].state, "realised");
   assert.equal(result.state.evidence.length, 4);
 });
+
+test("canonical instance inspection explains realisation participants through providers and evidence", async () => {
+  const canonical = structuredClone(declaration);
+  canonical.spec.governance = { desiredState: { repository: "https://github.com/example/acme-company.git", branch: "main", path: "omniform.yaml", changeMode: "pull_request" } };
+  canonical.spec.capabilities[0].realisations = ["support_reference"];
+  canonical.spec.realisations = [{ id: "support_reference", name: "Reference support", capability: "customer_support", participants: [
+    { resource: "support_agent", supplies: ["understand_request"] },
+    { resource: "email_connector", supplies: ["receive_request", "communicate_response"] },
+    { resource: "crm_connector", supplies: ["access_context"] }
+  ] }];
+  canonical.spec.resources = {
+    agents: [{ id: "support_agent", name: "Support Agent", offers: ["understand_request"] }],
+    connectors: [{ id: "email_connector", name: "Email Connector", offers: ["receive_request", "communicate_response"] }, { id: "crm_connector", name: "CRM Connector", offers: ["access_context"] }]
+  };
+  const subject = new OmniSeed({ store: new MemoryStateStore(), providers: providers(), binding: { desiredRevision: "abc123", environment: "production", deployment: { id: "os-production", provider: "vercel" } } });
+  const before = await subject.inspect(canonical);
+  assert.equal(before.instance.desiredState.repository, "https://github.com/example/acme-company.git");
+  assert.equal(before.instance.desiredRevision, "abc123");
+  assert.equal(before.realisations[0].participants[0].provider, "reference_agents");
+  const plan = await subject.plan(canonical, owner), approval = await subject.approve(plan, plan.actions.map(item => item.id), owner);
+  const after = (await subject.apply(canonical, plan, approval, owner)).registry;
+  assert.equal(after.realisations[0].status, "realised");
+  assert.ok(after.realisations[0].participants.every(item => item.evidence.length > 0));
+});

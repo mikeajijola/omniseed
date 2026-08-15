@@ -19,7 +19,9 @@ A concrete plan binds every action to the provider selected for its family. Plan
 
 Semantic systems may propose Omniform or a realisation, but only this deterministic path mutates resources. Desired declarations, deployed resources, observations, evidence and history are stored as distinct records.
 
-Company Change Proposals are persisted separately from Provider execution plans. Their approval binds an exact proposal hash and their base definition hash rejects stale changes. Applied candidates become the store-backed canonical definition, are recompiled, and expose ordinary realisation gaps. They never create resources or call Providers. See [`company-change.md`](company-change.md).
+Company Change Proposals are persisted separately from Provider execution plans. Their approval binds an exact proposal hash and their base definition hash rejects stale changes. For a Git-backed company, apply submits the exact candidate to the configured company-repository boundary as a branch and pull request. It does not replace desired state in the runtime store; only a subsequently loaded merged branch is authoritative. The pre-Git alpha behavior remains only for declarations without `spec.governance` as a migration shim. See [`company-change.md`](company-change.md).
+
+Inspection exposes canonical instance binding separately from company identity: Git authority and merged desired revision, Omniform version, environment, deployment identity, and observed-state revision. It also projects named realisations with primitive participants, family Provider bindings, deployment, observation, and evidence. The endpoint or OS process never defines company identity.
 
 Declared operations compile into an executable registry containing implementation, permission, mutation, approval, provider dependency and availability truth. Declaration alone never makes an operation executable.
 

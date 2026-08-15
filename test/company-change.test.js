@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseOmniform } from "@omniseed/omniform";
-import { MemoryStateStore, OmniSeed, ProviderRegistry, ReferenceProvider } from "../src/index.js";
+import { InMemoryGitCompanyRepository, MemoryStateStore, OmniSeed, ProviderRegistry, ReferenceProvider } from "../src/index.js";
 
 const actors = {
   lily: { actorId: "lily", actorType: "ai", permissions: ["company_change.propose"] },
@@ -142,4 +142,29 @@ test("full loop changes design then uses the ordinary realisation plan and obser
   const realised = await subject.apply(changed.declaration, plan, approval, actors.human);
   assert.equal(realised.registry.capabilities.find(item => item.id === "customer_triage").state, "realised");
   assert.ok(realised.state.evidence.length > 1);
+});
+
+test("Git-backed company change opens a proposal and cannot replace merged desired state", async () => {
+  const canonical = structuredClone(declaration);
+  canonical.spec.governance = { desiredState: { repository: "https://github.com/example/acme-company.git", branch: "main", path: "omniform.yaml", changeMode: "pull_request" } };
+  const repository = new InMemoryGitCompanyRepository();
+  const subject = new OmniSeed({ store: new MemoryStateStore(stateWithEvidence()), providers: new ProviderRegistry(), companyRepository: repository });
+  const proposal = await subject.proposeCompanyChange(canonical, request(), actors.lily);
+  await subject.approveCompanyChange(canonical, proposal.id, proposal.hash, actors.human);
+  const submitted = await subject.applyCompanyChange(canonical, proposal.id, actors.human);
+  assert.equal(submitted.proposal.status, "submitted");
+  assert.equal(submitted.submission.status, "open");
+  assert.equal(submitted.declaration.spec.capabilities.some(item => item.id === "customer_triage"), false);
+  assert.equal(submitted.candidateDeclaration.spec.capabilities.some(item => item.id === "customer_triage"), true);
+  assert.equal((await subject.inspect(canonical)).capabilities.some(item => item.id === "customer_triage"), false);
+  assert.equal(repository.submissions.length, 1);
+});
+
+test("Git-backed company change fails closed without a repository connection", async () => {
+  const canonical = structuredClone(declaration);
+  canonical.spec.governance = { desiredState: { repository: "https://github.com/example/acme-company.git", branch: "main", path: "omniform.yaml", changeMode: "pull_request" } };
+  const subject = engine(stateWithEvidence());
+  const proposal = await subject.proposeCompanyChange(canonical, request(), actors.lily);
+  await subject.approveCompanyChange(canonical, proposal.id, proposal.hash, actors.human);
+  await assert.rejects(subject.applyCompanyChange(canonical, proposal.id, actors.human), error => error.code === "company_repository_unavailable");
 });
