@@ -53,6 +53,22 @@ test("LocalProvider works only under an explicitly local/mock identity", () => {
   assert.equal(new LocalProvider({ id: "local_connectors", families: ["connectors"] }).metadata.id, "local_connectors");
 });
 
+test("Provider families are canonical and one package may support independently selected families", () => {
+  assert.throws(() => new ProviderRegistry().register(new ReferenceProvider({ id: "legacy", families: ["systems"] })), /non-canonical/);
+  const multi = new ReferenceProvider({ id: "multi", families: ["connectors", "observations"] });
+  const registry = new ProviderRegistry().register(multi).register(new ReferenceProvider({ id: "identity_only", families: ["identity"] }));
+  assert.equal(registry.statusForDesired("connectors", "multi").state, "healthy");
+  assert.equal(registry.statusForDesired("identity", "identity_only").state, "healthy");
+});
+
+test("historical resources using removed vocabulary remain auditable without becoming new desired families", async () => {
+  const historical = { version: 0, companyId: "acme", deployed: [{ family: "systems", id: "legacy_repository", provider: "legacy_github", providerResourceId: "github://repo/1" }], observed: [{ family: "systems", id: "legacy_repository", status: "healthy", checkedAt: "2026-08-10T00:00:00.000Z" }], evidence: [{ id: "legacy_evidence", source: "legacy_github", family: "systems", resourceId: "legacy_repository", observedAt: "2026-08-10T00:00:00.000Z" }], history: [], plans: [], companyChanges: [] };
+  const registry = await new OmniSeed({ store: new MemoryStateStore(historical), providers: providers() }).inspect(declaration);
+  assert.equal(registry.resources.find(item => item.id === "legacy_repository").observed.status, "healthy");
+  assert.equal(registry.evidence[0].family, "systems");
+  assert.equal(declaration.spec.providers.systems, undefined);
+});
+
 test("CapabilityResolver proposes resources without predeclared resources", () => {
   const resolution = new CapabilityResolver().resolveCompany({ declaration, currentState: { deployed: [], observed: [] }, providerRegistry: providers() })[0];
   assert.deepEqual(resolution.recommendedRealisation.resources.map(item => item.id).sort(), ["crm_connector", "email_connector", "support_agent", "support_workflow"]);

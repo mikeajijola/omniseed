@@ -23,7 +23,9 @@ Company Change Proposals are persisted separately from Provider execution plans.
 
 Declared operations compile into an executable registry containing implementation, permission, mutation, approval, provider dependency and availability truth. Declaration alone never makes an operation executable.
 
-`company_search` is an ordinary provider family. Calls carry the canonical company ID as their namespace and return provider-neutral, sourced results. Lily, UI, API, CLI, agents and machines use the same operation; none talk directly to a vendor. Search indexes canonical truth for retrieval but never becomes that truth.
+Company Search is an ordinary `search_company` operation over a selected `memory` Provider, not a primitive family. Calls carry the canonical company ID as their namespace and return Provider-neutral, sourced results. Lily, UI, API, CLI, agents and machines use the same operation; none talk directly to a vendor. Search indexes canonical truth for retrieval but never becomes that truth. Other compositions may combine agents, skills, connectors, observations, and memory; search infrastructure never becomes canonical truth.
+
+Historical deployed resources and evidence may retain the family recorded when they were created, including removed alpha vocabulary. OmniSeed keeps those records auditable. New desired declarations and new Provider advertisements use only the canonical Omniform families; no runtime code silently remaps `systems` or `company_search`.
 
 ## State and execution details
 

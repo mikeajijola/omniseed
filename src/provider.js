@@ -1,3 +1,5 @@
+import { primitiveFamilies } from "@omniseed/omniform";
+
 const providerStates = ["implementation_available", "configured", "connected", "healthy"];
 
 /** Normalized boundary for existing in-process Provider objects. */
@@ -35,6 +37,8 @@ export class ProviderRegistry {
   #providers = new Map();
   register(provider) {
     const handle = providerHandle(provider);
+    const obsolete = handle.metadata.families.filter(family => !primitiveFamilies.includes(family));
+    if (obsolete.length) throw new Error(`Provider advertises non-canonical primitive families: ${obsolete.join(", ")}`);
     if (this.#providers.has(handle.metadata.id)) throw new Error(`Provider already registered: ${handle.metadata.id}`);
     this.#providers.set(handle.metadata.id, handle);
     return this;
@@ -83,7 +87,7 @@ export class LocalProvider extends ReferenceProvider {
 
 export class CompanySearchProvider extends ReferenceProvider {
   constructor({ id, offerings = [], configured = true, connected = true, healthy = true }) {
-    super({ id, families: ["company_search"], offerings, configured, connected, healthy });
+    super({ id, families: ["memory"], offerings, configured, connected, healthy });
   }
   async index() { throw new Error("Company Search provider does not implement index"); }
   async update(request) { return this.index(request); }
@@ -97,10 +101,10 @@ export class LocalCompanySearchProvider extends CompanySearchProvider {
   #companies = new Map();
   constructor({ id = "local_company_search" } = {}) {
     if (id !== "local_company_search" && !id.startsWith("mock_company_search")) throw new Error("Local Company Search requires an explicit local/mock provider ID");
-    const resource = { family: "company_search", id: "company_search_index", name: "Company Search Index", offers: ["search_company_content"] };
+    const resource = { family: "memory", id: "company_knowledge_memory", name: "Company Knowledge Memory", offers: ["retain_company_knowledge"] };
     super({ id, offerings: [
-      { family: "company_search", id: "search_company_content", resource },
-      ...["index", "update", "remove", "search", "retrieve", "keyword_search", "metadata_filtering"].map(offering => ({ family: "company_search", id: offering }))
+      { family: "memory", id: "retain_company_knowledge", resource },
+      ...["index", "update", "remove", "search", "retrieve", "keyword_search", "metadata_filtering"].map(offering => ({ family: "memory", id: offering }))
     ] });
   }
   async index({ companyId, item }) {

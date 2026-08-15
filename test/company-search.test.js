@@ -8,15 +8,15 @@ apiVersion: omniform.org/v1alpha1
 kind: Company
 metadata: { name: Acme, id: acme }
 spec:
-  providers: { company_search: { provider: local_company_search } }
+  providers: { memory: { provider: local_company_search } }
   capabilities:
     - id: company_knowledge
       name: Company Knowledge
-      requires: [{ id: search_company_content, primitiveFamily: company_search }]
+      requires: [{ id: retain_company_knowledge, primitiveFamily: memory }]
   operations:
-    - { id: search_company, capability: company_knowledge, description: Search company, input: {}, output: {}, mutation: false, permissions: [company_search.read], approval: none, interfaces: [lily, ui, api, cli, agent, machine], providerDependencies: [company_search] }
+    - { id: search_company, capability: company_knowledge, description: Search company, input: {}, output: {}, mutation: false, permissions: [company_search.read], approval: none, interfaces: [lily, ui, api, cli, agent, machine], providerDependencies: [memory] }
 `;
-const json = JSON.stringify({ kind: "Company", apiVersion: "omniform.org/v1alpha1", metadata: { id: "acme", name: "Acme" }, spec: { operations: [{ interfaces: ["lily", "ui", "api", "cli", "agent", "machine"], approval: "none", permissions: ["company_search.read"], mutation: false, output: {}, input: {}, description: "Search company", capability: "company_knowledge", id: "search_company", providerDependencies: ["company_search"] }], capabilities: [{ requires: [{ primitiveFamily: "company_search", id: "search_company_content" }], name: "Company Knowledge", id: "company_knowledge" }], providers: { company_search: { provider: "local_company_search" } } } });
+const json = JSON.stringify({ kind: "Company", apiVersion: "omniform.org/v1alpha1", metadata: { id: "acme", name: "Acme" }, spec: { operations: [{ interfaces: ["lily", "ui", "api", "cli", "agent", "machine"], approval: "none", permissions: ["company_search.read"], mutation: false, output: {}, input: {}, description: "Search company", capability: "company_knowledge", id: "search_company", providerDependencies: ["memory"] }], capabilities: [{ requires: [{ primitiveFamily: "memory", id: "retain_company_knowledge" }], name: "Company Knowledge", id: "company_knowledge" }], providers: { memory: { provider: "local_company_search" } } } });
 const authorization = { actorId: "owner", permissions: ["company_search.read", "plan.create"] };
 
 test("equivalent YAML and JSON produce the same object, definition hash, registry and plan", async () => {
@@ -46,9 +46,9 @@ test("company isolation prevents cross-company search leakage", async () => {
 });
 
 test("missing desired search provider creates a gap with no fallback", async () => {
-  const declaration = parseOmniform(yaml); declaration.spec.providers.company_search.provider = "turbopuffer";
+  const declaration = parseOmniform(yaml); declaration.spec.providers.memory.provider = "turbopuffer";
   const registry = await new OmniSeed({ store: new MemoryStateStore(), providers: new ProviderRegistry() }).inspect(declaration);
-  assert.deepEqual(registry.providerGaps[0], { type: "provider_unavailable", primitiveFamily: "company_search", desiredProvider: "turbopuffer", state: "unavailable", message: "No installed provider implementation is available." });
+  assert.deepEqual(registry.providerGaps[0], { type: "provider_unavailable", primitiveFamily: "memory", desiredProvider: "turbopuffer", state: "unavailable", message: "No installed provider implementation is available." });
   await assert.rejects(new OmniSeed({ store: new MemoryStateStore(), providers: new ProviderRegistry() }).invokeOperation(declaration, "search_company", { query: "support" }, authorization), error => error.code === "provider_unavailable");
 });
 

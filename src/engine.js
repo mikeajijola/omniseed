@@ -160,9 +160,9 @@ function defaultOperations() {
     .register("reject_company_change", async (input, context) => context.engine.rejectCompanyChange(context.declaration, input.proposalId, input.reason, context.authorization))
     .register("apply_company_change", async (input, context) => context.engine.applyCompanyChange(context.declaration, input.proposalId, context.authorization))
     .register("search_company", async (input, context) => {
-      const selected = context.declaration.spec.providers.company_search?.provider;
-      const status = context.engine.providers.statusForDesired("company_search", selected);
-      if (status.state !== "healthy") throw new EngineError("provider_unavailable", "Company Search provider is unavailable", providerGap("company_search", selected, status.state));
+      const selected = context.declaration.spec.providers.memory?.provider;
+      const status = context.engine.providers.statusForDesired("memory", selected);
+      if (status.state !== "healthy") throw new EngineError("provider_unavailable", "Company knowledge retrieval provider is unavailable", providerGap("memory", selected, status.state));
       const provider = context.engine.providers.require(selected);
       try { return await provider.invoke("search", { ...input, companyId: context.declaration.metadata.id }, context.authorization); }
       catch (error) { throw new EngineError("provider_unavailable", `Registered provider cannot search Company content: ${error.message}`); }

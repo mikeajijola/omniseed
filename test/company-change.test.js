@@ -13,9 +13,9 @@ const source = `apiVersion: omniform.org/v1alpha1
 kind: Company
 metadata: { id: acme, name: Acme }
 spec:
-  providers: { systems: { provider: reference_systems } }
+  providers: { workflows: { provider: reference_workflows } }
   capabilities:
-    - { id: customer_support, name: Customer Support, requires: [{ id: support_service, primitiveFamily: systems }] }
+    - { id: customer_support, name: Customer Support, requires: [{ id: support_workflow, primitiveFamily: workflows }] }
   operations:
     - { id: propose_company_change, capability: customer_support, description: Propose a governed company definition change, input: {}, output: {}, mutation: true, permissions: [company_change.propose], approval: none, interfaces: [lily, ui, api, cli, agent, machine] }
     - { id: inspect_company_change, capability: customer_support, description: Inspect company change proposals, input: {}, output: {}, mutation: false, permissions: [company_change.read], approval: none, interfaces: [lily, ui, api, cli, agent, machine] }
@@ -25,7 +25,7 @@ spec:
 `;
 
 const declaration = parseOmniform(source);
-const addTriage = [{ op: "add", path: "/spec/capabilities/-", value: { id: "customer_triage", name: "Customer Triage", requires: [{ id: "triage_service", primitiveFamily: "systems" }] } }];
+const addTriage = [{ op: "add", path: "/spec/capabilities/-", value: { id: "customer_triage", name: "Customer Triage", requires: [{ id: "triage_workflow", primitiveFamily: "workflows" }] } }];
 
 function engine(state) { return new OmniSeed({ store: new MemoryStateStore(state), providers: new ProviderRegistry() }); }
 function request(patch = addTriage) {
@@ -127,9 +127,9 @@ test("current governance authorises a proposal that would alter future governanc
 });
 
 test("full loop changes design then uses the ordinary realisation plan and observation path", async () => {
-  const provider = new ReferenceProvider({ id: "reference_systems", families: ["systems"], offerings: [
-    { family: "systems", id: "support_service", resource: { family: "systems", id: "support_system", name: "Support System", offers: ["support_service"] } },
-    { family: "systems", id: "triage_service", resource: { family: "systems", id: "triage_system", name: "Triage System", offers: ["triage_service"] } }
+  const provider = new ReferenceProvider({ id: "reference_workflows", families: ["workflows"], offerings: [
+    { family: "workflows", id: "support_workflow", resource: { family: "workflows", id: "support_process", name: "Support Process", offers: ["support_workflow"] } },
+    { family: "workflows", id: "triage_workflow", resource: { family: "workflows", id: "triage_process", name: "Triage Process", offers: ["triage_workflow"] } }
   ] });
   const subject = new OmniSeed({ store: new MemoryStateStore(stateWithEvidence()), providers: new ProviderRegistry().register(provider) });
   const proposal = await subject.proposeCompanyChange(declaration, request(), actors.lily);
@@ -137,7 +137,7 @@ test("full loop changes design then uses the ordinary realisation plan and obser
   const changed = await subject.applyCompanyChange(declaration, proposal.id, actors.human);
   assert.equal(changed.registry.capabilities.find(item => item.id === "customer_triage").state, "missing");
   const plan = await subject.plan(changed.declaration, actors.human);
-  assert.ok(plan.actions.some(action => action.resourceId === "triage_system"));
+  assert.ok(plan.actions.some(action => action.resourceId === "triage_process"));
   const approval = await subject.approve(plan, plan.actions.map(action => action.id), actors.human);
   const realised = await subject.apply(changed.declaration, plan, approval, actors.human);
   assert.equal(realised.registry.capabilities.find(item => item.id === "customer_triage").state, "realised");
