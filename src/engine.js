@@ -1,7 +1,6 @@
 import { compileCompany } from "./compiler.js";
 import { createPlan, definitionHash, verifyPlanHash } from "./planner.js";
 import { authorize, EngineError, OperationRegistry } from "./operations.js";
-import { providerGap } from "./provider.js";
 import { CapabilityResolver } from "./resolver.js";
 import { applyDefinitionPatch, createCompanyChangeProposal, previewCompanyChange, verifyCompanyChangeProposal } from "./company-change.js";
 
@@ -160,14 +159,17 @@ function defaultOperations() {
     .register("reject_company_change", async (input, context) => context.engine.rejectCompanyChange(context.declaration, input.proposalId, input.reason, context.authorization))
     .register("apply_company_change", async (input, context) => context.engine.applyCompanyChange(context.declaration, input.proposalId, context.authorization))
     .register("search_company", async (input, context) => {
-      const selected = context.declaration.spec.providers.memory?.provider;
-      const status = context.engine.providers.statusForDesired("memory", selected);
-      if (status.state !== "healthy") throw new EngineError("provider_unavailable", "Company knowledge retrieval provider is unavailable", providerGap("memory", selected, status.state));
-      const provider = context.engine.providers.require(selected);
-      try { return await provider.invoke("search", { ...input, companyId: context.declaration.metadata.id }, context.authorization); }
+      const operation = context.declaration.spec.operations.find(item => item.id === "search_company");
+      const realisation = context.engine.providers.operationRealisation(context.declaration, operation);
+      const unavailable = realisation.participants.filter(item => item.status.state !== "healthy");
+      if (unavailable.length) throw new EngineError("provider_unavailable", "Company Search capability has unavailable declared primitive realisations", { capabilityId: realisation.capabilityId, participants: unavailable.map(participantSummary) });
+      if (!realisation.executor) throw new EngineError("operation_unimplemented", "No Provider participating in the Company Search capability advertises search_company", { capabilityId: realisation.capabilityId, participants: realisation.participants.map(participantSummary) });
+      try { return await realisation.executor.invoke("search", { ...input, companyId: context.declaration.metadata.id, capabilityRealisation: { capabilityId: realisation.capabilityId, participants: realisation.participants.map(participantSummary) } }, context.authorization); }
       catch (error) { throw new EngineError("provider_unavailable", `Registered provider cannot search Company content: ${error.message}`); }
     });
 }
+
+function participantSummary(item) { return { family: item.family, providerId: item.providerId, state: item.status.state, executesOperation: item.executesOperation }; }
 
 function activeDeclaration(declaration, state) { return state?.canonicalDefinition ?? declaration; }
 function requireProposal(state, proposalId) {

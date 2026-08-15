@@ -23,7 +23,9 @@ Company Change Proposals are persisted separately from Provider execution plans.
 
 Declared operations compile into an executable registry containing implementation, permission, mutation, approval, provider dependency and availability truth. Declaration alone never makes an operation executable.
 
-Company Search is an ordinary `search_company` operation over a selected `memory` Provider, not a primitive family. Calls carry the canonical company ID as their namespace and return Provider-neutral, sourced results. Lily, UI, API, CLI, agents and machines use the same operation; none talk directly to a vendor. Search indexes canonical truth for retrieval but never becomes that truth. Other compositions may combine agents, skills, connectors, observations, and memory; search infrastructure never becomes canonical truth.
+Company Search is the ordinary `company_search` Company Capability exposed through the governed `search_company` operation, not a primitive family. The operation resolves the participating Providers from its Capability strategy and declared `providerDependencies`; it never globally selects `memory`, `skills`, or another family. A memory-backed strategy, federated connector strategy, agent-led strategy, or hybrid can therefore retain the same Capability and operation IDs. One participating Provider must explicitly advertise `search_company` as the operation executor; all declared participants remain visible as the capability realisation context. This is deliberately smaller than a generic orchestration engine.
+
+Calls carry the canonical company ID as their namespace and return Provider-neutral, sourced results. Lily, UI, API, CLI, agents and machines use the same operation; none talk directly to a vendor. Search results never become canonical truth and the read-only operation cannot mutate runtime or company-definition state. Any resulting design change still enters governed Company Change.
 
 Historical deployed resources and evidence may retain the family recorded when they were created, including removed alpha vocabulary. OmniSeed keeps those records auditable. New desired declarations and new Provider advertisements use only the canonical Omniform families; no runtime code silently remaps `systems` or `company_search`.
 
@@ -33,7 +35,7 @@ Runtime state defaults to `.omniseed/state.json`. `JsonStateStore` uses optimist
 
 The CLI supports validate, inspect, plan and reconcile. Apply is intentionally not a casual CLI command. It requires the exact persisted plan, approval bound to that plan hash and selected action IDs, and suitable actor permissions. Apply never regenerates a plan. Definition or state drift produces `plan_stale`.
 
-`LocalProvider` accepts only explicit local or mock IDs. `LocalCompanySearchProvider` is deterministic, isolated by company ID, and intended only for local development and tests. It is never an automatic fallback. A vendor such as turbopuffer would be an adapter, not an engine dependency.
+`LocalProvider` accepts only explicit local or mock IDs. `LocalCompanySearchProvider` is deterministic, isolated by company ID, and intended only for local development and tests. It defaults to the `skills` responsibility because it executes retrieval/ranking; tests may explicitly configure it as `memory` when it is the retained knowledge implementation. It is never an automatic fallback. A vendor adapter must advertise the primitive responsibility it actually manifests, not the location where data happens to reside.
 
 Company Search results use a Provider-neutral shape. Results retain provenance, source, Capability and evidence references, optional relevance, timestamps, and metadata. Search does not own definitions, Provider identity, plans, approvals, permissions, state versions, applies, or evidence metadata.
 
