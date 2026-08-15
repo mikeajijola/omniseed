@@ -1,5 +1,5 @@
 import { EngineError } from "./operations.js";
-import { canonicalize } from "@omniseed/omniform";
+import { serializeCanonical } from "@omniseed/omniform";
 
 /** A replaceable boundary for proposing desired-state changes to canonical Git. */
 export class CompanyRepository {
@@ -41,7 +41,7 @@ export class ProviderGitCompanyRepository extends CompanyRepository {
         expectedBaseSha: repositoryState.baseSha,
         branch,
         path: authority.path,
-        content: `${JSON.stringify(canonicalize(candidate), null, 2)}\n`,
+        content: `${serializeCanonical(candidate)}\n`,
         commitMessage: `company: apply ${proposal.id}`,
         pullRequestTitle: `Company Change: ${proposal.reason}`,
         pullRequestBody: companyChangeBody(proposal)

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseOmniform } from "@omniseed/omniform";
+import { parseOmniform, serializeCanonical } from "@omniseed/omniform";
 import { InMemoryGitCompanyRepository, MemoryStateStore, OmniSeed, ProviderGitCompanyRepository, ProviderRegistry, ReferenceProvider } from "../src/index.js";
 
 const actors = {
@@ -201,6 +201,7 @@ test("Provider-backed company repository submits the exact candidate through a w
   const action = calls.find(call => call.method === "apply").action;
   assert.equal(action.family, "workflows");
   assert.equal(action.desired.spec.path, "omniform.yaml");
+  assert.equal(action.desired.spec.content, `${serializeCanonical(submitted.candidateDeclaration)}\n`);
   assert.deepEqual(JSON.parse(action.desired.spec.content), submitted.candidateDeclaration);
   assert.deepEqual(calls.map(call => call.method), ["invoke", "validate", "plan", "apply", "observe"]);
   const observed = await repository.inspectSubmission({ submission: submitted.submission });
