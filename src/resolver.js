@@ -2,10 +2,12 @@ import { flattenResources, resourceKey } from "./compiler.js";
 import { providerGap } from "./provider.js";
 
 export class CapabilityResolver {
-  resolveCapability({ capability, currentState, providerRegistry, availableResources = [], providerMap, policy = {}, strategy = "recommended" }) {
+  resolveCapability({ capability, currentState, providerRegistry, availableResources = [], providerMap, realisations = [], policy = {}, strategy = "recommended" }) {
     const deployed = new Map((currentState.deployed ?? []).map(item => [resourceKey(item.family, item.id), item]));
     const observed = new Map((currentState.observed ?? []).map(item => [resourceKey(item.family, item.id), item]));
-    const explicit = capability.realisation?.resources ? new Set(capability.realisation.resources) : null;
+    const declaredRealisations = realisations.filter(item => (capability.realisations ?? []).includes(item.id));
+    const declaredParticipants = declaredRealisations.flatMap(item => item.participants.map(participant => participant.resource));
+    const explicit = declaredParticipants.length ? new Set(declaredParticipants) : capability.realisation?.resources ? new Set(capability.realisation.resources) : null;
     const allowedResources = availableResources.filter(resource => !explicit || explicit.has(resource.id));
     const coveredRequirements = [];
     const missingRequirements = [];
@@ -61,7 +63,7 @@ export class CapabilityResolver {
       ...flattenResources(declaration.spec.resources),
       ...(currentState.deployed ?? []).map(item => item.desired ?? item)
     ].map(resource => [resourceKey(resource.family, resource.id), resource])).values()];
-    return declaration.spec.capabilities.map(capability => this.resolveCapability({ capability, currentState, providerRegistry, availableResources, providerMap: declaration.spec.providers, policy, strategy }));
+    return declaration.spec.capabilities.map(capability => this.resolveCapability({ capability, currentState, providerRegistry, availableResources, providerMap: declaration.spec.providers, realisations: declaration.spec.realisations ?? [], policy, strategy }));
   }
 }
 

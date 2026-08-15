@@ -1,11 +1,16 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
 import { emptyRuntimeState } from "./compiler.js";
 
 export class JsonStateStore {
   constructor(path) { this.path = path; }
   async load(companyId) {
-    try { return JSON.parse(await readFile(this.path, "utf8")); }
+    try {
+      const state = JSON.parse(await readFile(this.path, "utf8"));
+      if (state.companyId && companyId && state.companyId !== companyId) throw new Error(`State company mismatch: expected ${companyId}, found ${state.companyId}`);
+      return state;
+    }
     catch (error) { if (error.code === "ENOENT") return emptyRuntimeState(companyId); throw error; }
   }
   async save(state, expectedVersion) {
@@ -13,7 +18,7 @@ export class JsonStateStore {
     if (current.version !== expectedVersion) throw new Error(`State conflict: expected version ${expectedVersion}, found ${current.version}`);
     const next = { ...state, version: expectedVersion + 1 };
     await mkdir(dirname(this.path), { recursive: true });
-    const temporary = `${this.path}.${process.pid}.tmp`;
+    const temporary = `${this.path}.${process.pid}.${randomUUID()}.tmp`;
     await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, "utf8");
     await rename(temporary, this.path);
     return next;

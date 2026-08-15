@@ -5,12 +5,23 @@ import { CapabilityResolver } from "./resolver.js";
 import { applyDefinitionPatch, createCompanyChangeProposal, previewCompanyChange, verifyCompanyChangeProposal } from "./company-change.js";
 
 export class OmniSeed {
-  constructor({ store, providers, resolver = new CapabilityResolver(), operations = defaultOperations() }) { this.store = store; this.providers = providers; this.resolver = resolver; this.operations = operations; }
+  constructor({ store, providers, resolver = new CapabilityResolver(), operations = defaultOperations(), companyRepository = null, binding = {} }) { this.store = store; this.providers = providers; this.resolver = resolver; this.operations = operations; this.companyRepository = companyRepository; this.binding = binding; }
   async inspect(declaration) {
     const state = await this.store.load(declaration.metadata.id);
     const active = activeDeclaration(declaration, state);
     const resolutions = this.resolver.resolveCompany({ declaration: active, currentState: state, providerRegistry: this.providers });
-    return { ...compileCompany(active, state, { providerRegistry: this.providers, resolutions, operationRegistry: this.operations }), definitionHash: definitionHash(active) };
+    const persistedBinding = Object.fromEntries(Object.entries(state.binding ?? {}).filter(([, value]) => value != null));
+    return { ...compileCompany(active, state, { providerRegistry: this.providers, resolutions, operationRegistry: this.operations, binding: { ...this.binding, ...persistedBinding } }), definitionHash: definitionHash(active) };
+  }
+  async recordCompanyBinding(declaration, binding, authorization) {
+    authorize(authorization, ["company.bind"]);
+    const state = await this.store.load(declaration.metadata.id), at = new Date().toISOString();
+    const nextBinding = { ...(state.binding ?? {}), ...binding };
+    return this.store.save({ ...state, binding: nextBinding, history: [...state.history, { type: "company_binding_recorded", actorId: authorization.actorId, desiredRevision: nextBinding.desiredRevision ?? null, observedRevision: nextBinding.observedRevision ?? null, at }] }, state.version);
+  }
+  async listActivity(declaration, authorization) {
+    authorize(authorization, ["activity.read"]);
+    return structuredClone((await this.store.load(declaration.metadata.id)).history ?? []);
   }
   async plan(declaration, authorization) {
     authorize(authorization, ["plan.create"]);
@@ -68,7 +79,8 @@ export class OmniSeed {
       const provider = this.providers.require(resource.provider);
       observed.push({ family: resource.family, id: resource.id, ...(await provider.observe(resource)) });
     }
-    await this.store.save({ ...state, observed, history: [...state.history, { type: "reconciled", actorId: authorization.actorId, at: new Date().toISOString() }] }, state.version);
+    const at = new Date().toISOString(), observedRevision = state.binding?.desiredRevision ?? state.binding?.observedRevision ?? null;
+    await this.store.save({ ...state, binding: { ...(state.binding ?? {}), observedRevision }, observed, history: [...state.history, { type: "reconciled", actorId: authorization.actorId, observedRevision, at }] }, state.version);
     return this.inspect(declaration);
   }
   async proposeCompanyChange(declaration, request, authorization) {
@@ -123,9 +135,27 @@ export class OmniSeed {
     if (definitionHash(active) !== proposal.baseDefinitionHash) return this.#markCompanyChangeStale(state, proposal, authorization, definitionHash(active));
     const candidate = applyDefinitionPatch(active, proposal.patch), resultingDefinitionHash = definitionHash(candidate);
     if (resultingDefinitionHash !== proposal.proposedDefinitionHash) throw new EngineError("company_change_tampered", "Applied result differs from the reviewed candidate definition");
+    if (active.spec.governance?.desiredState) {
+      if (!this.companyRepository) throw new EngineError("company_repository_unavailable", "Canonical Git company repository is not connected; approved desired state cannot be changed outside Git");
+      const submission = await this.companyRepository.submit({ authority: active.spec.governance.desiredState, declaration: active, candidate, proposal, authorization });
+      const submittedAt = new Date().toISOString(), submittedProposal = { ...proposal, status: "submitted", resultingDefinitionHash, submittedAt, submittedBy: { actorId: authorization.actorId }, submission };
+      const next = await this.store.save({ ...state, companyChanges: replaceProposal(state, submittedProposal), evidence: [...state.evidence, ...(submission.evidence ?? [])], history: [...state.history, { type: "company_change_submitted", proposalId, proposalHash: proposal.hash, actorId: authorization.actorId, branch: submission.branch, pullRequest: submission.pullRequest, at: submittedAt }] }, state.version);
+      return { proposal: submittedProposal, declaration: active, candidateDeclaration: candidate, state: next, registry: await this.inspect(active), submission };
+    }
     const appliedAt = new Date().toISOString(), appliedProposal = { ...proposal, status: "applied", resultingDefinitionHash, appliedAt, appliedBy: { actorId: authorization.actorId } };
     const next = await this.store.save({ ...state, canonicalDefinition: candidate, companyChanges: replaceProposal(state, appliedProposal), history: [...state.history, { type: "company_change_applied", proposalId, proposalHash: proposal.hash, actorId: authorization.actorId, baseDefinitionHash: proposal.baseDefinitionHash, resultingDefinitionHash, at: appliedAt }] }, state.version);
     return { proposal: appliedProposal, declaration: candidate, state: next, registry: await this.inspect(candidate) };
+  }
+  async mergeCompanyChange(declaration, proposalId, authorization) {
+    authorize(authorization, ["company_change.merge"]);
+    const state = await this.store.load(declaration.metadata.id), proposal = requireProposal(state, proposalId);
+    if (proposal.status !== "submitted") throw new EngineError("company_change_invalid_state", `Only submitted changes can be merged; found ${proposal.status}`);
+    if (!this.companyRepository) throw new EngineError("company_repository_unavailable", "Canonical Git company repository is not connected");
+    const merge = await this.companyRepository.mergeSubmission({ submission: proposal.submission, proposal, authorization });
+    if (!merge?.merged || !merge.mergeCommitSha) throw new EngineError("company_repository_merge_failed", "Company repository Provider did not return merge evidence");
+    const mergedProposal = { ...proposal, status: "merged", merge };
+    const next = await this.store.save({ ...state, companyChanges: replaceProposal(state, mergedProposal), evidence: [...state.evidence, ...(merge.evidence ?? [])], history: [...state.history, { type: "company_change_merged", proposalId, actorId: authorization.actorId, pullRequest: proposal.submission.pullRequest, mergeCommitSha: merge.mergeCommitSha, at: merge.mergedAt }] }, state.version);
+    return { proposal: mergedProposal, state: next, merge };
   }
   async #markCompanyChangeStale(state, proposal, authorization, actualDefinitionHash) {
     const staleAt = new Date().toISOString(), changed = { ...proposal, status: "stale", staleAt };
@@ -150,7 +180,12 @@ function verifyStoredPlan(stored, supplied) {
 const stale = (message = "Definition or runtime state changed after plan review") => new EngineError("plan_stale", message);
 function defaultOperations() {
   return new OperationRegistry()
+    .register("inspect_company", async (_input, context) => context.registry)
     .register("get_capability", async (input, context) => context.registry.capabilities.find(item => item.id === input.capabilityId) ?? null)
+    .register("inspect_realisation", async (input, context) => context.registry.realisations.find(item => item.id === input.realisationId) ?? null)
+    .register("inspect_provider_binding", async (input, context) => context.registry.providers.find(item => item.family === input.primitiveFamily) ?? null)
+    .register("list_activity", async (_input, context) => context.engine.listActivity(context.declaration, context.authorization))
+    .register("observe_company", async (_input, context) => context.engine.reconcile(context.declaration, context.authorization))
     .register("generate_plan", async (_input, context) => context.engine.plan(context.declaration, context.authorization))
     .register("apply_plan", async (input, context) => context.engine.apply(context.declaration, input.plan, input.approval, context.authorization))
     .register("propose_company_change", async (input, context) => context.engine.proposeCompanyChange(context.declaration, input, context.authorization))
@@ -158,6 +193,7 @@ function defaultOperations() {
     .register("approve_company_change", async (input, context) => context.engine.approveCompanyChange(context.declaration, input.proposalId, input.proposalHash, context.authorization))
     .register("reject_company_change", async (input, context) => context.engine.rejectCompanyChange(context.declaration, input.proposalId, input.reason, context.authorization))
     .register("apply_company_change", async (input, context) => context.engine.applyCompanyChange(context.declaration, input.proposalId, context.authorization))
+    .register("merge_company_change", async (input, context) => context.engine.mergeCompanyChange(context.declaration, input.proposalId, context.authorization))
     .register("search_company", async (input, context) => {
       const operation = context.declaration.spec.operations.find(item => item.id === "search_company");
       const realisation = context.engine.providers.operationRealisation(context.declaration, operation);

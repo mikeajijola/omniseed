@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseOmniform } from "@omniseed/omniform";
-import { MemoryStateStore, OmniSeed, ProviderRegistry, ReferenceProvider } from "../src/index.js";
+import { parseOmniform, serializeCanonical } from "@omniseed/omniform";
+import { applyDefinitionPatch, InMemoryGitCompanyRepository, MemoryStateStore, OmniSeed, ProviderGitCompanyRepository, ProviderRegistry, ReferenceProvider } from "../src/index.js";
 
 const actors = {
   lily: { actorId: "lily", actorType: "ai", permissions: ["company_change.propose"] },
@@ -142,4 +142,123 @@ test("full loop changes design then uses the ordinary realisation plan and obser
   const realised = await subject.apply(changed.declaration, plan, approval, actors.human);
   assert.equal(realised.registry.capabilities.find(item => item.id === "customer_triage").state, "realised");
   assert.ok(realised.state.evidence.length > 1);
+});
+
+test("Git-backed company change opens a proposal and cannot replace merged desired state", async () => {
+  const canonical = structuredClone(declaration);
+  canonical.spec.governance = { desiredState: { repository: "https://github.com/example/acme-company.git", branch: "main", path: "omniform.yaml", changeMode: "pull_request" } };
+  const repository = new InMemoryGitCompanyRepository();
+  const subject = new OmniSeed({ store: new MemoryStateStore(stateWithEvidence()), providers: new ProviderRegistry(), companyRepository: repository });
+  const proposal = await subject.proposeCompanyChange(canonical, request(), actors.lily);
+  await subject.approveCompanyChange(canonical, proposal.id, proposal.hash, actors.human);
+  const submitted = await subject.applyCompanyChange(canonical, proposal.id, actors.human);
+  assert.equal(submitted.proposal.status, "submitted");
+  assert.equal(submitted.submission.status, "open");
+  assert.equal(submitted.declaration.spec.capabilities.some(item => item.id === "customer_triage"), false);
+  assert.equal(submitted.candidateDeclaration.spec.capabilities.some(item => item.id === "customer_triage"), true);
+  assert.equal((await subject.inspect(canonical)).capabilities.some(item => item.id === "customer_triage"), false);
+  assert.equal(repository.submissions.length, 1);
+});
+
+test("Git-backed company change fails closed without a repository connection", async () => {
+  const canonical = structuredClone(declaration);
+  canonical.spec.governance = { desiredState: { repository: "https://github.com/example/acme-company.git", branch: "main", path: "omniform.yaml", changeMode: "pull_request" } };
+  const subject = engine(stateWithEvidence());
+  const proposal = await subject.proposeCompanyChange(canonical, request(), actors.lily);
+  await subject.approveCompanyChange(canonical, proposal.id, proposal.hash, actors.human);
+  await assert.rejects(subject.applyCompanyChange(canonical, proposal.id, actors.human), error => error.code === "company_repository_unavailable");
+});
+
+test("Provider-backed company repository submits the exact candidate through a workflows Provider", async () => {
+  const calls = [];
+  const canonical = structuredClone(declaration);
+  canonical.spec.governance = { desiredState: { repository: "https://github.com/example/acme-company.git", branch: "main", path: "omniform.yaml", changeMode: "pull_request" } };
+  const provider = {
+    metadata: { id: "github_protocol", families: ["workflows"], operations: ["company.repository.inspect"] },
+    async invoke(operation, input) {
+      calls.push({ method: "invoke", operation, input });
+      return { repository: input.repository, baseBranch: input.baseBranch, baseSha: "a".repeat(40), document: { path: input.path, content: `${serializeCanonical(canonical)}\n` } };
+    },
+    async validate(action) { calls.push({ method: "validate", action }); return { valid: true, issues: [] }; },
+    async plan(action) { calls.push({ method: "plan", action }); return { deterministic: true, actionId: action.id }; },
+    async apply(action) {
+      calls.push({ method: "apply", action });
+      return { providerResourceId: "github://example/acme-company/pull/7", status: "proposed", attributes: { baseSha: "a".repeat(40), commitSha: "b".repeat(40), pullRequestNumber: 7, pullRequestUrl: "https://github.com/example/acme-company/pull/7" } };
+    },
+    async observe(resource) {
+      calls.push({ method: "observe", resource });
+      return { status: "healthy", checkedAt: "2026-08-15T00:00:00Z", evidence: [{ type: "software_change_state", source: "github_protocol" }], snapshot: { pullRequest: { state: "open", merged: false } } };
+    }
+  };
+  const repository = new ProviderGitCompanyRepository({ provider });
+  const subject = new OmniSeed({ store: new MemoryStateStore(stateWithEvidence()), providers: new ProviderRegistry(), companyRepository: repository });
+  const proposal = await subject.proposeCompanyChange(canonical, request(), actors.lily);
+  await subject.approveCompanyChange(canonical, proposal.id, proposal.hash, actors.human);
+  const submitted = await subject.applyCompanyChange(canonical, proposal.id, actors.human);
+  assert.equal(submitted.submission.pullRequest, "https://github.com/example/acme-company/pull/7");
+  assert.equal(submitted.submission.baseRevision, "a".repeat(40));
+  assert.equal(submitted.submission.commit, "b".repeat(40));
+  const action = calls.find(call => call.method === "apply").action;
+  assert.equal(action.family, "workflows");
+  assert.equal(action.desired.spec.path, "omniform.yaml");
+  assert.deepEqual(parseOmniform(action.desired.spec.content), submitted.candidateDeclaration);
+  assert.deepEqual(calls.map(call => call.method), ["invoke", "validate", "plan", "apply", "observe"]);
+  const observed = await repository.inspectSubmission({ submission: submitted.submission });
+  assert.equal(observed.status, "open");
+  assert.equal(observed.merged, false);
+  assert.equal(observed.currentDesiredRevision, null);
+});
+
+test("Provider-backed company repository rejects a Provider outside workflows", () => {
+  assert.throws(() => new ProviderGitCompanyRepository({ provider: { metadata: { id: "wrong", families: ["agents"], operations: ["company.repository.inspect"] } } }), error => error.code === "company_repository_invalid");
+});
+
+test("Provider-backed company repository preserves YAML comments, ordering, and unrelated bytes", async () => {
+  const yaml = `# company header\napiVersion: omniform.org/v1alpha1\nkind: Company\nmetadata:\n  id: acme\n  name: Acme # keep name comment\nspec:\n  intent: Original intent\n  providers: { workflows: { provider: reference_workflows } } # keep flow style\n  capabilities:\n    - { id: customer_support, name: Customer Support, requires: [{ id: support_workflow, primitiveFamily: workflows }] }\n  operations:\n    - { id: inspect_company, capability: customer_support, description: Inspect company, input: {}, output: {}, mutation: false, permissions: [], approval: none, interfaces: [api] }\n`;
+  const current = parseOmniform(yaml);
+  const patch = [{ op: "replace", path: "/spec/intent", value: "Clarified intent" }];
+  const candidate = applyDefinitionPatch(current, patch);
+  let applied;
+  const provider = {
+    metadata: { id: "github_protocol", families: ["workflows"], operations: ["company.repository.inspect"] },
+    async invoke() { return { baseSha: "a".repeat(40), document: { path: "omniform.yaml", content: yaml } }; },
+    async validate() { return { valid: true, issues: [] }; }, async plan(action) { return { deterministic: true, actionId: action.id }; },
+    async apply(action) { applied = action; return { providerResourceId: "github://example/acme/pull/8", status: "proposed", attributes: { baseSha: "a".repeat(40), commitSha: "b".repeat(40), pullRequestNumber: 8, pullRequestUrl: "https://github.com/example/acme/pull/8" } }; },
+    async observe() { return { status: "healthy", checkedAt: "2026-08-15T00:00:00Z", evidence: [], snapshot: { pullRequest: { state: "open" } } }; }
+  };
+  const repository = new ProviderGitCompanyRepository({ provider });
+  await repository.submit({ authority: { repository: "https://github.com/example/acme.git", branch: "main", path: "omniform.yaml", changeMode: "pull_request" }, candidate, proposal: { id: "ccp_format", hash: "hash", reason: "Clarify intent", proposedBy: { actorId: "lily" }, patch } });
+  assert.equal(applied.desired.spec.content, yaml.replace("  intent: Original intent", "  intent: Clarified intent"));
+});
+
+test("format mismatch is rejected before Provider validation or mutation", async () => {
+  let providerCalls = 0;
+  const provider = {
+    metadata: { id: "github_protocol", families: ["workflows"], operations: ["company.repository.inspect"] },
+    async invoke() { return { baseSha: "a".repeat(40), document: { path: "omniform.yaml", content: source } }; },
+    async validate() { providerCalls += 1; return { valid: true, issues: [] }; }, async plan() { providerCalls += 1; }, async apply() { providerCalls += 1; }, async observe() { providerCalls += 1; }
+  };
+  const repository = new ProviderGitCompanyRepository({ provider });
+  await assert.rejects(repository.submit({ authority: { repository: "https://github.com/example/acme.git", branch: "main", path: "omniform.yaml", changeMode: "pull_request" }, candidate: declaration, proposal: { id: "ccp_bad", hash: "hash", reason: "Bad", proposedBy: { actorId: "lily" }, patch: [{ op: "replace", path: "/metadata/name", value: "Different" }] } }), error => error.code === "company_repository_serialization_invalid");
+  assert.equal(providerCalls, 0);
+});
+
+test("governed company merge requires authority and persists Provider evidence", async () => {
+  const canonical = structuredClone(declaration);
+  canonical.spec.governance = { desiredState: { repository: "https://github.com/example/acme-company.git", branch: "main", path: "omniform.yaml", changeMode: "pull_request" } };
+  let mergeCalls = 0;
+  const repository = {
+    async submit() { return { repository: canonical.spec.governance.desiredState.repository, baseBranch: "main", baseRevision: "a".repeat(40), branch: "omniseed/change", commit: "b".repeat(40), pullRequest: "https://github.com/example/acme-company/pull/9", pullRequestNumber: 9, providerResourceId: "github://example/acme-company/pull/9", status: "open", evidence: [] }; },
+    async mergeSubmission({ authorization }) { mergeCalls += 1; assert.equal(authorization.actorId, "owner"); return { merged: true, mergeCommitSha: "c".repeat(40), mergedAt: "2026-08-15T00:00:00Z", evidence: [{ id: "merge_9", type: "company_change_merged", source: "github_protocol" }] }; }
+  };
+  const subject = new OmniSeed({ store: new MemoryStateStore(stateWithEvidence()), providers: new ProviderRegistry(), companyRepository: repository });
+  const proposal = await subject.proposeCompanyChange(canonical, request(), actors.lily);
+  await subject.approveCompanyChange(canonical, proposal.id, proposal.hash, actors.human);
+  await subject.applyCompanyChange(canonical, proposal.id, actors.human);
+  await assert.rejects(subject.mergeCompanyChange(canonical, proposal.id, { actorId: "lily", permissions: [] }), error => error.code === "authorization_denied");
+  const result = await subject.mergeCompanyChange(canonical, proposal.id, { actorId: "owner", permissions: ["company_change.merge"] });
+  assert.equal(result.proposal.status, "merged");
+  assert.equal(result.proposal.merge.mergeCommitSha, "c".repeat(40));
+  assert.equal(result.state.evidence.at(-1).id, "merge_9");
+  assert.equal(mergeCalls, 1);
 });

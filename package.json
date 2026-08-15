@@ -1,12 +1,14 @@
 {
   "name": "@omniseed/engine",
-  "version": "1.0.0-alpha.3",
+  "version": "1.0.0-alpha.4",
   "description": "Headless compiler, planner, provisioner and reconciler for Company-as-Code.",
+  "repository": { "type": "git", "url": "https://github.com/mikeajijola/omniseed.git" },
+  "publishConfig": { "access": "public", "tag": "alpha" },
   "type": "module",
   "exports": { ".": "./src/index.js" },
   "bin": { "omniseed": "./src/cli.js" },
   "scripts": { "test": "node --test", "check": "npm test" },
-  "dependencies": { "@omniseed/omniform": "1.0.0-alpha.3" },
+  "dependencies": { "@omniseed/omniform": "1.0.0-alpha.4", "yaml": "^2.8.1" },
   "engines": { "node": ">=22" },
   "files": ["src", "README.md", "docs"]
 }
