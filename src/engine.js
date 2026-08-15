@@ -10,7 +10,18 @@ export class OmniSeed {
     const state = await this.store.load(declaration.metadata.id);
     const active = activeDeclaration(declaration, state);
     const resolutions = this.resolver.resolveCompany({ declaration: active, currentState: state, providerRegistry: this.providers });
-    return { ...compileCompany(active, state, { providerRegistry: this.providers, resolutions, operationRegistry: this.operations, binding: this.binding }), definitionHash: definitionHash(active) };
+    const persistedBinding = Object.fromEntries(Object.entries(state.binding ?? {}).filter(([, value]) => value != null));
+    return { ...compileCompany(active, state, { providerRegistry: this.providers, resolutions, operationRegistry: this.operations, binding: { ...this.binding, ...persistedBinding } }), definitionHash: definitionHash(active) };
+  }
+  async recordCompanyBinding(declaration, binding, authorization) {
+    authorize(authorization, ["company.bind"]);
+    const state = await this.store.load(declaration.metadata.id), at = new Date().toISOString();
+    const nextBinding = { ...(state.binding ?? {}), ...binding };
+    return this.store.save({ ...state, binding: nextBinding, history: [...state.history, { type: "company_binding_recorded", actorId: authorization.actorId, desiredRevision: nextBinding.desiredRevision ?? null, observedRevision: nextBinding.observedRevision ?? null, at }] }, state.version);
+  }
+  async listActivity(declaration, authorization) {
+    authorize(authorization, ["activity.read"]);
+    return structuredClone((await this.store.load(declaration.metadata.id)).history ?? []);
   }
   async plan(declaration, authorization) {
     authorize(authorization, ["plan.create"]);
@@ -68,7 +79,8 @@ export class OmniSeed {
       const provider = this.providers.require(resource.provider);
       observed.push({ family: resource.family, id: resource.id, ...(await provider.observe(resource)) });
     }
-    await this.store.save({ ...state, observed, history: [...state.history, { type: "reconciled", actorId: authorization.actorId, at: new Date().toISOString() }] }, state.version);
+    const at = new Date().toISOString(), observedRevision = state.binding?.desiredRevision ?? state.binding?.observedRevision ?? null;
+    await this.store.save({ ...state, binding: { ...(state.binding ?? {}), observedRevision }, observed, history: [...state.history, { type: "reconciled", actorId: authorization.actorId, observedRevision, at }] }, state.version);
     return this.inspect(declaration);
   }
   async proposeCompanyChange(declaration, request, authorization) {
@@ -170,6 +182,10 @@ function defaultOperations() {
   return new OperationRegistry()
     .register("inspect_company", async (_input, context) => context.registry)
     .register("get_capability", async (input, context) => context.registry.capabilities.find(item => item.id === input.capabilityId) ?? null)
+    .register("inspect_realisation", async (input, context) => context.registry.realisations.find(item => item.id === input.realisationId) ?? null)
+    .register("inspect_provider_binding", async (input, context) => context.registry.providers.find(item => item.family === input.primitiveFamily) ?? null)
+    .register("list_activity", async (_input, context) => context.engine.listActivity(context.declaration, context.authorization))
+    .register("observe_company", async (_input, context) => context.engine.reconcile(context.declaration, context.authorization))
     .register("generate_plan", async (_input, context) => context.engine.plan(context.declaration, context.authorization))
     .register("apply_plan", async (input, context) => context.engine.apply(context.declaration, input.plan, input.approval, context.authorization))
     .register("propose_company_change", async (input, context) => context.engine.proposeCompanyChange(context.declaration, input, context.authorization))

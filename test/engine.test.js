@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseOmniform } from "@omniseed/omniform";
-import { CapabilityResolver, LocalProvider, MemoryStateStore, OmniSeed, ProviderRegistry, ReferenceProvider } from "../src/index.js";
+import { mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { CapabilityResolver, JsonStateStore, LocalProvider, MemoryStateStore, OmniSeed, ProviderRegistry, ReferenceProvider } from "../src/index.js";
 
 const owner = { actorId: "owner", permissions: ["plan.create", "plan.approve", "plan.apply", "state.reconcile"] };
 const supportSource = `apiVersion: omniform.org/v1alpha1
@@ -145,4 +148,40 @@ test("canonical instance inspection explains realisation participants through pr
   const after = (await subject.apply(canonical, plan, approval, owner)).registry;
   assert.equal(after.realisations[0].status, "realised");
   assert.ok(after.realisations[0].participants.every(item => item.evidence.length > 0));
+});
+
+test("durable state preserves binding, proposals and activity across engine restart", async () => {
+  const path = join(await mkdtemp(join(tmpdir(), "omniseed-state-")), "state.json");
+  const permissions = { actorId: "operator", permissions: ["company.bind", "company_change.propose", "company_change.read", "activity.read"] };
+  const first = new OmniSeed({ store: new JsonStateStore(path), providers: providers() });
+  await first.recordCompanyBinding(declaration, { desiredRevision: "desired-a", observedRevision: "observed-a" }, permissions);
+  const proposal = await first.proposeCompanyChange(declaration, { reason: "Clarify company name", risk: "low", patch: [{ op: "replace", path: "/metadata/name", value: "Acme Company" }] }, permissions);
+  const second = new OmniSeed({ store: new JsonStateStore(path), providers: providers() });
+  const registry = await second.inspect(declaration);
+  assert.equal(registry.instance.desiredRevision, "desired-a");
+  assert.equal(registry.instance.observedStateRevision, 2);
+  assert.equal((await second.getCompanyChangeProposal(declaration, proposal.id, permissions)).hash, proposal.hash);
+  assert.deepEqual((await second.listActivity(declaration, permissions)).map(item => item.type), ["company_binding_recorded", "company_change_proposed"]);
+  assert.match(await readFile(path, "utf8"), /desired-a/);
+});
+
+test("desired and observed revisions remain separate and reconciliation advances observation deterministically", async () => {
+  const path = join(await mkdtemp(join(tmpdir(), "omniseed-state-")), "state.json");
+  const auth = { actorId: "operator", permissions: ["company.bind", "state.reconcile", "activity.read"] };
+  const engine = new OmniSeed({ store: new JsonStateStore(path), providers: providers() });
+  await engine.recordCompanyBinding(declaration, { desiredRevision: "desired-b", observedRevision: "observed-a" }, auth);
+  assert.equal((await engine.inspect(declaration)).instance.observedStateRevision, 1);
+  await engine.reconcile(declaration, auth);
+  const restarted = new OmniSeed({ store: new JsonStateStore(path), providers: providers() });
+  const state = await restarted.store.load("acme");
+  assert.equal(state.binding.desiredRevision, "desired-b");
+  assert.equal(state.binding.observedRevision, "desired-b");
+  assert.equal(state.history.at(-1).type, "reconciled");
+});
+
+test("durable store rejects cross-company state and optimistic write conflicts", async () => {
+  const path = join(await mkdtemp(join(tmpdir(), "omniseed-state-")), "state.json"), store = new JsonStateStore(path);
+  const initial = await store.load("acme"), saved = await store.save(initial, 0);
+  await assert.rejects(store.load("other"), /company mismatch/);
+  await assert.rejects(store.save(saved, 0), /State conflict/);
 });
