@@ -26,7 +26,7 @@ jobs:
           package-manager-cache: false
       - name: Require Trusted Publishing-capable npm
         run: node -e "const v=require('node:child_process').execFileSync('npm',['--version'],{encoding:'utf8'}).trim().split('.').map(Number); if(v[0]<11 || (v[0]===11 && v[1]<5) || (v[0]===11 && v[1]===5 && v[2]<1)) process.exit(1)"
-      - run: npm install --ignore-scripts
+      - run: npm ci
       - run: npm test
       - name: Verify requested version
         env:
