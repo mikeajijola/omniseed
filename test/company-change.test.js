@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseOmniform } from "@omniseed/omniform";
-import { InMemoryGitCompanyRepository, MemoryStateStore, OmniSeed, ProviderRegistry, ReferenceProvider } from "../src/index.js";
+import { InMemoryGitCompanyRepository, MemoryStateStore, OmniSeed, ProviderGitCompanyRepository, ProviderRegistry, ReferenceProvider } from "../src/index.js";
 
 const actors = {
   lily: { actorId: "lily", actorType: "ai", permissions: ["company_change.propose"] },
@@ -167,4 +167,48 @@ test("Git-backed company change fails closed without a repository connection", a
   const proposal = await subject.proposeCompanyChange(canonical, request(), actors.lily);
   await subject.approveCompanyChange(canonical, proposal.id, proposal.hash, actors.human);
   await assert.rejects(subject.applyCompanyChange(canonical, proposal.id, actors.human), error => error.code === "company_repository_unavailable");
+});
+
+test("Provider-backed company repository submits the exact candidate through a workflows Provider", async () => {
+  const calls = [];
+  const provider = {
+    metadata: { id: "github_protocol", families: ["workflows"], operations: ["company.repository.inspect"] },
+    async invoke(operation, input) {
+      calls.push({ method: "invoke", operation, input });
+      return { repository: input.repository, baseBranch: input.baseBranch, baseSha: "a".repeat(40) };
+    },
+    async validate(action) { calls.push({ method: "validate", action }); return { valid: true, issues: [] }; },
+    async plan(action) { calls.push({ method: "plan", action }); return { deterministic: true, actionId: action.id }; },
+    async apply(action) {
+      calls.push({ method: "apply", action });
+      return { providerResourceId: "github://example/acme-company/pull/7", status: "proposed", attributes: { baseSha: "a".repeat(40), commitSha: "b".repeat(40), pullRequestNumber: 7, pullRequestUrl: "https://github.com/example/acme-company/pull/7" } };
+    },
+    async observe(resource) {
+      calls.push({ method: "observe", resource });
+      return { status: "healthy", checkedAt: "2026-08-15T00:00:00Z", evidence: [{ type: "software_change_state", source: "github_protocol" }], snapshot: { pullRequest: { state: "open", merged: false } } };
+    }
+  };
+  const canonical = structuredClone(declaration);
+  canonical.spec.governance = { desiredState: { repository: "https://github.com/example/acme-company.git", branch: "main", path: "omniform.yaml", changeMode: "pull_request" } };
+  const repository = new ProviderGitCompanyRepository({ provider });
+  const subject = new OmniSeed({ store: new MemoryStateStore(stateWithEvidence()), providers: new ProviderRegistry(), companyRepository: repository });
+  const proposal = await subject.proposeCompanyChange(canonical, request(), actors.lily);
+  await subject.approveCompanyChange(canonical, proposal.id, proposal.hash, actors.human);
+  const submitted = await subject.applyCompanyChange(canonical, proposal.id, actors.human);
+  assert.equal(submitted.submission.pullRequest, "https://github.com/example/acme-company/pull/7");
+  assert.equal(submitted.submission.baseRevision, "a".repeat(40));
+  assert.equal(submitted.submission.commit, "b".repeat(40));
+  const action = calls.find(call => call.method === "apply").action;
+  assert.equal(action.family, "workflows");
+  assert.equal(action.desired.spec.path, "omniform.yaml");
+  assert.deepEqual(JSON.parse(action.desired.spec.content), submitted.candidateDeclaration);
+  assert.deepEqual(calls.map(call => call.method), ["invoke", "validate", "plan", "apply", "observe"]);
+  const observed = await repository.inspectSubmission({ submission: submitted.submission });
+  assert.equal(observed.status, "open");
+  assert.equal(observed.merged, false);
+  assert.equal(observed.currentDesiredRevision, null);
+});
+
+test("Provider-backed company repository rejects a Provider outside workflows", () => {
+  assert.throws(() => new ProviderGitCompanyRepository({ provider: { metadata: { id: "wrong", families: ["agents"], operations: ["company.repository.inspect"] } } }), error => error.code === "company_repository_invalid");
 });
