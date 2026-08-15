@@ -6,7 +6,7 @@
   "exports": { ".": "./src/index.js" },
   "bin": { "omniseed": "./src/cli.js" },
   "scripts": { "test": "node --test", "check": "npm test" },
-  "dependencies": { "@omniseed/omniform": "1.0.0-alpha.4" },
+  "dependencies": { "@omniseed/omniform": "1.0.0-alpha.4", "yaml": "^2.8.1" },
   "engines": { "node": ">=22" },
   "files": ["src", "README.md", "docs"]
 }

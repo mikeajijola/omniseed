@@ -134,6 +134,17 @@ export class OmniSeed {
     const next = await this.store.save({ ...state, canonicalDefinition: candidate, companyChanges: replaceProposal(state, appliedProposal), history: [...state.history, { type: "company_change_applied", proposalId, proposalHash: proposal.hash, actorId: authorization.actorId, baseDefinitionHash: proposal.baseDefinitionHash, resultingDefinitionHash, at: appliedAt }] }, state.version);
     return { proposal: appliedProposal, declaration: candidate, state: next, registry: await this.inspect(candidate) };
   }
+  async mergeCompanyChange(declaration, proposalId, authorization) {
+    authorize(authorization, ["company_change.merge"]);
+    const state = await this.store.load(declaration.metadata.id), proposal = requireProposal(state, proposalId);
+    if (proposal.status !== "submitted") throw new EngineError("company_change_invalid_state", `Only submitted changes can be merged; found ${proposal.status}`);
+    if (!this.companyRepository) throw new EngineError("company_repository_unavailable", "Canonical Git company repository is not connected");
+    const merge = await this.companyRepository.mergeSubmission({ submission: proposal.submission, proposal, authorization });
+    if (!merge?.merged || !merge.mergeCommitSha) throw new EngineError("company_repository_merge_failed", "Company repository Provider did not return merge evidence");
+    const mergedProposal = { ...proposal, status: "merged", merge };
+    const next = await this.store.save({ ...state, companyChanges: replaceProposal(state, mergedProposal), evidence: [...state.evidence, ...(merge.evidence ?? [])], history: [...state.history, { type: "company_change_merged", proposalId, actorId: authorization.actorId, pullRequest: proposal.submission.pullRequest, mergeCommitSha: merge.mergeCommitSha, at: merge.mergedAt }] }, state.version);
+    return { proposal: mergedProposal, state: next, merge };
+  }
   async #markCompanyChangeStale(state, proposal, authorization, actualDefinitionHash) {
     const staleAt = new Date().toISOString(), changed = { ...proposal, status: "stale", staleAt };
     await this.store.save({ ...state, companyChanges: replaceProposal(state, changed), history: [...state.history, { type: "company_change_stale", proposalId: proposal.id, actorId: authorization.actorId, at: staleAt }] }, state.version);
@@ -166,6 +177,7 @@ function defaultOperations() {
     .register("approve_company_change", async (input, context) => context.engine.approveCompanyChange(context.declaration, input.proposalId, input.proposalHash, context.authorization))
     .register("reject_company_change", async (input, context) => context.engine.rejectCompanyChange(context.declaration, input.proposalId, input.reason, context.authorization))
     .register("apply_company_change", async (input, context) => context.engine.applyCompanyChange(context.declaration, input.proposalId, context.authorization))
+    .register("merge_company_change", async (input, context) => context.engine.mergeCompanyChange(context.declaration, input.proposalId, context.authorization))
     .register("search_company", async (input, context) => {
       const operation = context.declaration.spec.operations.find(item => item.id === "search_company");
       const realisation = context.engine.providers.operationRealisation(context.declaration, operation);
