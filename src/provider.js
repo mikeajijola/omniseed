@@ -1,3 +1,5 @@
+import { primitiveFamilies } from "@omniseed/omniform";
+
 const providerStates = ["implementation_available", "configured", "connected", "healthy"];
 
 /** Normalized boundary for existing in-process Provider objects. */
@@ -35,6 +37,8 @@ export class ProviderRegistry {
   #providers = new Map();
   register(provider) {
     const handle = providerHandle(provider);
+    const obsolete = handle.metadata.families.filter(family => !primitiveFamilies.includes(family));
+    if (obsolete.length) throw new Error(`Provider advertises non-canonical primitive families: ${obsolete.join(", ")}`);
     if (this.#providers.has(handle.metadata.id)) throw new Error(`Provider already registered: ${handle.metadata.id}`);
     this.#providers.set(handle.metadata.id, handle);
     return this;
@@ -46,6 +50,16 @@ export class ProviderRegistry {
   supportsCapabilityOffering(providerId, family, offering) {
     const provider = this.get(providerId);
     return Boolean(provider && provider.metadata.families.includes(family) && provider.metadata.offerings.some(item => item.id === offering && item.family === family));
+  }
+  operationRealisation(declaration, operation) {
+    const capability = declaration.spec.capabilities.find(item => item.id === operation.capability);
+    const capabilityFamilies = [...new Set((capability?.requires ?? []).map(item => item.primitiveFamily))];
+    const families = operation.providerDependencies?.length ? operation.providerDependencies : capabilityFamilies;
+    const participants = families.map(family => {
+      const providerId = declaration.spec.providers[family]?.provider, status = this.statusForDesired(family, providerId), provider = this.get(providerId);
+      return { family, providerId, status, provider, executesOperation: Boolean(provider?.metadata.operations?.includes(operation.id)) };
+    });
+    return { capabilityId: capability?.id ?? operation.capability, participants, executor: participants.find(item => item.status.state === "healthy" && item.executesOperation)?.provider ?? null };
   }
   statusForDesired(family, providerId) {
     const provider = this.get(providerId);
@@ -59,8 +73,8 @@ export class ProviderRegistry {
 }
 
 export class ReferenceProvider {
-  constructor({ id, families, offerings = [], configured = true, connected = true, healthy = true }) {
-    this.metadata = { id, name: id, version: "1", families, offerings };
+  constructor({ id, families, offerings = [], operations = [], configured = true, connected = true, healthy = true }) {
+    this.metadata = { id, name: id, version: "1", families, offerings, operations };
     this.status = { implementation_available: true, configured, connected, healthy };
   }
   async validate(action) { return { valid: this.status.healthy && this.metadata.families.includes(action.family), issues: [] }; }
@@ -82,8 +96,8 @@ export class LocalProvider extends ReferenceProvider {
 }
 
 export class CompanySearchProvider extends ReferenceProvider {
-  constructor({ id, offerings = [], configured = true, connected = true, healthy = true }) {
-    super({ id, families: ["company_search"], offerings, configured, connected, healthy });
+  constructor({ id, family = "skills", offerings = [], configured = true, connected = true, healthy = true }) {
+    super({ id, families: [family], offerings, operations: ["search_company"], configured, connected, healthy });
   }
   async index() { throw new Error("Company Search provider does not implement index"); }
   async update(request) { return this.index(request); }
@@ -95,12 +109,12 @@ export class CompanySearchProvider extends ReferenceProvider {
 /** Explicit deterministic test/local implementation; never selected as a fallback. */
 export class LocalCompanySearchProvider extends CompanySearchProvider {
   #companies = new Map();
-  constructor({ id = "local_company_search" } = {}) {
+  constructor({ id = "local_company_search", family = "skills", requirement = family === "skills" ? "semantic_search" : family === "memory" ? "retained_company_knowledge" : "access_company_sources" } = {}) {
     if (id !== "local_company_search" && !id.startsWith("mock_company_search")) throw new Error("Local Company Search requires an explicit local/mock provider ID");
-    const resource = { family: "company_search", id: "company_search_index", name: "Company Search Index", offers: ["search_company_content"] };
-    super({ id, offerings: [
-      { family: "company_search", id: "search_company_content", resource },
-      ...["index", "update", "remove", "search", "retrieve", "keyword_search", "metadata_filtering"].map(offering => ({ family: "company_search", id: offering }))
+    const resource = { family, id: `company_search_${family}`, name: "Company Search Realisation", offers: [requirement] };
+    super({ id, family, offerings: [
+      { family, id: requirement, resource },
+      ...["index", "update", "remove", "search", "retrieve", "keyword_search", "metadata_filtering"].map(offering => ({ family, id: offering }))
     ] });
   }
   async index({ companyId, item }) {
@@ -113,8 +127,9 @@ export class LocalCompanySearchProvider extends CompanySearchProvider {
   async update(request) { return this.index(request); }
   async remove({ companyId, id }) { requireCompany(companyId); return this.#companies.get(companyId)?.delete(id) ?? false; }
   async retrieve({ companyId, id }) { requireCompany(companyId); const item = this.#companies.get(companyId)?.get(id); return item ? toSearchResult(item, 1) : null; }
-  async search({ companyId, query, filters = {} }) {
+  async search({ companyId, query, filters = {}, capabilityRealisation }) {
     requireCompany(companyId);
+    this.lastCapabilityRealisation = capabilityRealisation;
     const terms = String(query ?? "").toLowerCase().split(/\s+/).filter(Boolean);
     return [...(this.#companies.get(companyId)?.values() ?? [])]
       .filter(item => !filters.capability || item.capabilityReferences?.includes(filters.capability))

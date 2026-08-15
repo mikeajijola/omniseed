@@ -15,11 +15,11 @@ const declaration = parseOmniform(`apiVersion: omniform.org/v1alpha1
 kind: Company
 metadata: { id: protocol_test, name: Protocol Test Company }
 spec:
-  providers: { systems: { provider: python_reference } }
+  providers: { connectors: { provider: python_reference } }
   capabilities:
     - id: public_service
       name: Public Service
-      requires: [{ id: host_app, primitiveFamily: systems }]
+      requires: [{ id: access_service, primitiveFamily: connectors }]
   operations:
     - { id: get_capability, capability: public_service, description: Get capability, input: {}, output: {}, mutation: false, permissions: [], approval: none, interfaces: [api] }
 `);
@@ -61,7 +61,7 @@ test("Python Provider completes the real plan, approve, apply, observe, persist,
 test("existing in-process JavaScript Providers still use the normalized handle", async () => {
   const calls = [];
   const js = {
-    metadata: { id: "js", families: ["systems"], offerings: [] },
+    metadata: { id: "js", families: ["connectors"], offerings: [] },
     status: { implementation_available: true, configured: true, connected: true, healthy: true },
     async validate(action) { calls.push(["validate", action.id]); return { valid: true, issues: [] }; },
     async plan(action) { calls.push(["plan", action.id]); return {}; },
@@ -118,7 +118,7 @@ test("invalid apply response cannot enter canonical state", { skip: !pythonAvail
 });
 test("unhealthy external Provider remains a truthful distinct state", { skip: !pythonAvailable }, async t => {
   const provider = await connect("unhealthy"); t.after(() => provider.shutdown());
-  const registry = new ProviderRegistry().register(provider), status = registry.statusForDesired("systems", "python_reference");
+  const registry = new ProviderRegistry().register(provider), status = registry.statusForDesired("connectors", "python_reference");
   assert.deepEqual({ implementation_available: status.implementation_available, configured: status.configured, connected: status.connected, healthy: status.healthy, state: status.state }, { implementation_available: true, configured: true, connected: true, healthy: false, state: "unhealthy" });
   const inspected = await new OmniSeed({ store: new MemoryStateStore(), providers: registry }).inspect(declaration);
   assert.equal(inspected.providerGaps[0].state, "unhealthy"); assert.equal(inspected.capabilities[0].state, "missing");

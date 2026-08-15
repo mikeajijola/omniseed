@@ -34,14 +34,14 @@ def initialized():
     protocol = "omniseed.provider.protocol/9.9" if MODE == "version_mismatch" else PROTOCOL
     provider_id = "wrong_python_provider" if MODE == "id_mismatch" else "python_reference"
     resource = {
-        "family": "systems", "id": "python_service", "name": "Python Reference Service",
-        "offers": ["host_app"]
+        "family": "connectors", "id": "python_service", "name": "Python Reference Connector",
+        "offers": ["access_service"]
     }
     return {
         "protocolVersion": protocol,
         "provider": {"id": provider_id, "name": "Python Reference Provider", "version": "1.0.0"},
-        "primitiveFamilies": ["systems"],
-        "offerings": [{"family": "systems", "id": "host_app", "resource": resource}],
+        "primitiveFamilies": ["connectors"],
+        "offerings": [{"family": "connectors", "id": "access_service", "resource": resource}],
         "operations": ["echo"],
         "methods": METHODS
     }
@@ -67,7 +67,7 @@ def handle(method, params):
         if MODE == "crash":
             os._exit(17)
         action = params.get("action") or {}
-        valid = action.get("family") == "systems" and bool(action.get("resourceId"))
+        valid = action.get("family") == "connectors" and bool(action.get("resourceId"))
         return {"valid": valid, "issues": [] if valid else [{"message": "systems resourceId is required"}]}
     if method == "provider.plan":
         action = params.get("action") or {}
