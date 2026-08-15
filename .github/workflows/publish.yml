@@ -7,6 +7,11 @@ on:
         description: Exact package version already committed on main
         required: true
         type: string
+      verify_only:
+        description: Verify npm recognises this workflow as the Trusted Publisher without publishing
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -28,8 +33,19 @@ jobs:
         run: node -e "const v=require('node:child_process').execFileSync('npm',['--version'],{encoding:'utf8'}).trim().split('.').map(Number); if(v[0]<11 || (v[0]===11 && v[1]<5) || (v[0]===11 && v[1]===5 && v[2]<1)) process.exit(1)"
       - run: npm ci
       - run: npm test
+      - run: npm pack --dry-run
       - name: Verify requested version
         env:
           RELEASE_VERSION: ${{ inputs.version }}
         run: node -e "const p=require('./package.json'); if(p.version!==process.env.RELEASE_VERSION) throw new Error('Requested version does not match package.json')"
-      - run: npm publish --access public --tag alpha
+      - name: Verify npm Trusted Publisher exchange
+        if: inputs.verify_only
+        run: node -e "const u=process.env.ACTIONS_ID_TOKEN_REQUEST_URL+'&audience='+encodeURIComponent('npm:registry.npmjs.org'); fetch(u,{headers:{authorization:'Bearer '+process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}}).then(async r=>{if(!r.ok)throw new Error('GitHub OIDC request failed: '+r.status);return r.json()}).then(o=>fetch('https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/'+encodeURIComponent(require('./package.json').name),{method:'POST',headers:{authorization:'Bearer '+o.value}})).then(async r=>{if(!r.ok)throw new Error('npm OIDC exchange failed: '+r.status);const o=await r.json();if(typeof o.token!=='string'||!o.token)throw new Error('npm OIDC exchange returned no token');console.log('Trusted Publisher exchange verified')})"
+      - name: Publish public alpha
+        if: ${{ !inputs.verify_only }}
+        run: npm publish --access public --tag alpha
+      - name: Verify published registry version
+        if: ${{ !inputs.verify_only }}
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: for attempt in 1 2 3 4 5 6 7 8 9 10; do test "$(npm view "$(node -p "require('./package.json').name")@$RELEASE_VERSION" version 2>/dev/null)" = "$RELEASE_VERSION" && exit 0; sleep 10; done; exit 1
