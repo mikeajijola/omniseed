@@ -18,6 +18,7 @@ Read these rules before you learn the code.
 - They must not secretly call Providers behind OmniSeed's back.
 - Search helps find knowledge. Search is not company truth.
 - Providers must remain replaceable.
+- A Provider is the supplying organisation boundary. Do not create separate Providers for that organisation's products, services, frameworks, SDKs, or features.
 
 Be honest about gaps. “Missing,” “not connected,” and “failed” are useful answers. A made-up success is dangerous.
 
