@@ -265,6 +265,41 @@ spec:
   assert.match(applied.desired.spec.content, /      - id: support\n        name: Support/);
 });
 
+test("Provider-backed company repository preserves the newline after a replaced block", async () => {
+  const yaml = `apiVersion: omniform.org/v1alpha1
+kind: Company
+metadata: { id: acme, name: Acme }
+spec:
+  providers: { connectors: { provider: reference_connectors } }
+  capabilities:
+    - id: customer_support
+      name: Customer Support
+      requires: [{ id: support_connector, primitiveFamily: connectors }]
+  resources:
+    connectors:
+      - { id: support, name: Support, offers: [support_connector] }
+  operations:
+    - { id: inspect_company, capability: customer_support, description: Inspect company, input: {}, output: {}, mutation: false, permissions: [], approval: none, interfaces: [api] }
+`;
+  const current = parseOmniform(yaml);
+  const resources = structuredClone(current.spec.resources);
+  resources.connectors[0].spec = { endpoint: "https://example.com" };
+  const patch = [{ op: "replace", path: "/spec/resources", value: resources }];
+  const candidate = applyDefinitionPatch(current, patch);
+  let applied;
+  const provider = {
+    metadata: { id: "github_protocol", families: ["workflows"], operations: ["company.repository.inspect"] },
+    async invoke() { return { baseSha: "a".repeat(40), document: { path: "omniform.yaml", content: yaml } }; },
+    async validate() { return { valid: true, issues: [] }; }, async plan(action) { return { deterministic: true, actionId: action.id }; },
+    async apply(action) { applied = action; return { providerResourceId: "github://example/acme/pull/11", status: "proposed", attributes: { baseSha: "a".repeat(40), commitSha: "b".repeat(40), pullRequestNumber: 11, pullRequestUrl: "https://github.com/example/acme/pull/11" } }; },
+    async observe() { return { status: "healthy", checkedAt: "2026-08-16T00:00:00Z", evidence: [], snapshot: { pullRequest: { state: "open" } } }; }
+  };
+  const repository = new ProviderGitCompanyRepository({ provider });
+  await repository.submit({ authority: { repository: "https://github.com/example/acme.git", branch: "main", path: "omniform.yaml", changeMode: "pull_request" }, candidate, proposal: { id: "ccp_block", hash: "hash", reason: "Bind resources", proposedBy: { actorId: "lily" }, patch } });
+  assert.deepEqual(parseOmniform(applied.desired.spec.content), candidate);
+  assert.match(applied.desired.spec.content, /endpoint: https:\/\/example.com\n  operations:/);
+});
+
 test("format mismatch is rejected before Provider validation or mutation", async () => {
   let providerCalls = 0;
   const provider = {
