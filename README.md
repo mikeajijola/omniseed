@@ -104,7 +104,7 @@ OmniSeed itself is a Company-as-Code company. Its own Omniform should be public.
 
 When there is a reasonable choice, the OmniSeed company should prefer an option that is visible, understandable, easy to inspect, and easy to contribute to.
 
-For example, the OmniSeed company may choose GitHub Actions as its Workflow Provider because contributors can see the workflows beside the code.
+For example, the OmniSeed company may choose GitHub as its Provider for a Workflow primitive and use GitHub Actions as the product implementing that responsibility. Actions is not a separate Provider.
 
 This is one example of a dogfood choice for the OmniSeed company's own implementation. It is not part of the universal model or a rule for other companies.
 

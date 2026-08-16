@@ -13,7 +13,7 @@ The control loop is `load → compile → diff → plan → approve → apply �
 - `company-change.js` owns deterministic definition patches, proposal hashing, candidate validation, evidence references, and preview impact.
 - `engine.js` joins these parts and controls access to Provider side effects.
 
-Provider adapters are explicitly registered and advertise primitive families and capability offerings. Desired, installed, configured, connected and healthy are distinct. The resolver moves from requirements and current coverage to candidate realisations; exact resources in Omniform are optional constraints.
+Provider adapters are explicitly registered and advertise primitive families and capability offerings. Provider identity is the supplying organisation boundary; its products, services, frameworks, SDKs, and features are implementation choices beneath that Provider. Desired, installed, configured, connected and healthy are distinct. The resolver moves from requirements and current coverage to candidate realisations; exact resources in Omniform are optional constraints. See the authoritative [Provider semantics](https://github.com/mikeajijola/omniseed-ecosystem/blob/main/docs/provider-semantics.md).
 
 A concrete plan binds every action to the provider selected for its family. Plans are persisted and content-hashed. Actor-scoped approval names the exact plan hash and selected action IDs. Definition and state-version checks prevent approval reuse against a different reality.
 

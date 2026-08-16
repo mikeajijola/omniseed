@@ -1,5 +1,7 @@
 # OmniSeed Provider Protocol v1
 
+The protocol's Provider identity denotes the supplying organisation boundary, not a product, service, framework, SDK, feature, model, or endpoint. One Provider may expose multiple primitive-family implementations through different products. Protocol conformance does not override the semantic review required by the authoritative [Provider semantics](https://github.com/mikeajijola/omniseed-ecosystem/blob/main/docs/provider-semantics.md).
+
 Protocol identifier: `omniseed.provider.protocol/1.0`
 
 The protocol lets OmniSeed use a Provider running outside the Node.js process. Provider implementation language is not part of the contract.
