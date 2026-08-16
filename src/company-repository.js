@@ -141,7 +141,9 @@ function replaceDocumentRanges(source, document, patch) {
     const path = change.path.split("/").slice(1).map(segment => segment.replace(/~1/g, "/").replace(/~0/g, "~"));
     const node = document.getIn(path, true);
     if (!node?.range) throw new Error(`replace path does not exist in canonical document: ${change.path}`);
-    return { start: node.range[0], end: node.range[1], value: stringify(change.value).trimEnd() };
+    const column = node.range[0] - (source.lastIndexOf("\n", node.range[0] - 1) + 1);
+    const value = stringify(change.value).trimEnd().replaceAll("\n", `\n${" ".repeat(column)}`);
+    return { start: node.range[0], end: node.range[1], value };
   }).sort((left, right) => right.start - left.start);
   return replacements.reduce((result, replacement) => `${result.slice(0, replacement.start)}${replacement.value}${result.slice(replacement.end)}`, source);
 }
