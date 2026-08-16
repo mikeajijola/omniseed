@@ -42,10 +42,10 @@ jobs:
         if: inputs.verify_only
         run: node -e "const u=process.env.ACTIONS_ID_TOKEN_REQUEST_URL+'&audience='+encodeURIComponent('npm:registry.npmjs.org'); fetch(u,{headers:{authorization:'Bearer '+process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}}).then(async r=>{if(!r.ok)throw new Error('GitHub OIDC request failed: '+r.status);return r.json()}).then(o=>fetch('https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/'+encodeURIComponent(require('./package.json').name),{method:'POST',headers:{authorization:'Bearer '+o.value}})).then(async r=>{if(!r.ok)throw new Error('npm OIDC exchange failed: '+r.status);const o=await r.json();if(typeof o.token!=='string'||!o.token)throw new Error('npm OIDC exchange returned no token');console.log('Trusted Publisher exchange verified')})"
       - name: Publish public alpha
-        if: ${{ !inputs.verify_only }}
+        if: ${{ ! inputs.verify_only }}
         run: npm publish --access public --tag alpha
       - name: Verify published registry version
-        if: ${{ !inputs.verify_only }}
+        if: ${{ ! inputs.verify_only }}
         env:
           RELEASE_VERSION: ${{ inputs.version }}
         run: for attempt in 1 2 3 4 5 6 7 8 9 10; do test "$(npm view "$(node -p "require('./package.json').name")@$RELEASE_VERSION" version 2>/dev/null)" = "$RELEASE_VERSION" && exit 0; sleep 10; done; exit 1
