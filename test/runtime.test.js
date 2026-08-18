@@ -52,6 +52,16 @@ test("runtime assembly reports uninstalled desired Providers without fabricating
   assert.equal(runtime.desiredProviderBindings.find(item => item.resourceId === "reconcile_workflow").providerId, "github");
 });
 
+test("repeated planning against unchanged desired and runtime state returns the exact persisted plan", async () => {
+  const runtime = await assembleRuntime({ declaration, store: new MemoryStateStore(), providerHandles: [provider()], binding: { desiredRevision: "approved-sha" } });
+  const first = await runtime.engine.invokeOperation(declaration, "generate_plan", {}, planner);
+  const second = await runtime.engine.invokeOperation(declaration, "generate_plan", {}, planner);
+  const state = await runtime.engine.store.load("repeatable_company");
+  assert.deepEqual(second, first);
+  assert.equal(state.plans.length, 1);
+  assert.equal(state.history.filter(item => item.type === "plan_generated").length, 1);
+});
+
 test("HTTP state remains company-scoped and uses optimistic concurrency", async () => {
   let saved = null;
   const fetchImpl = async (url, init = {}) => {
