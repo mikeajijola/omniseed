@@ -16,7 +16,8 @@ export class OmniSeed {
   async recordCompanyBinding(declaration, binding, authorization) {
     authorize(authorization, ["company.bind"]);
     const state = await this.store.load(declaration.metadata.id), at = new Date().toISOString();
-    const nextBinding = { ...(state.binding ?? {}), ...binding };
+    const nextBinding = { ...(state.binding ?? {}), ...normalizeBinding(binding) };
+    if (JSON.stringify(nextBinding) === JSON.stringify(state.binding ?? {})) return structuredClone(state);
     return this.store.save({ ...state, binding: nextBinding, history: [...state.history, { type: "company_binding_recorded", actorId: authorization.actorId, desiredRevision: nextBinding.desiredRevision ?? null, observedRevision: nextBinding.observedRevision ?? null, at }] }, state.version);
   }
   async listActivity(declaration, authorization) {
@@ -191,6 +192,12 @@ function verifyStoredPlan(stored, supplied) {
   if (!stored) throw stale("Plan does not exist in company state");
   if (!verifyPlanHash(supplied) || stored.hash !== supplied.hash || JSON.stringify(stored) !== JSON.stringify(supplied)) throw stale("Plan differs from the persisted reviewed plan");
 }
+function normalizeBinding(binding) {
+  if (!binding || typeof binding !== "object" || Array.isArray(binding)) throw new EngineError("company_binding_invalid", "Company binding must be an object");
+  const allowed = new Set(["desiredRevision", "observedRevision", "environment", "deployment"]), unknown = Object.keys(binding).filter(key => !allowed.has(key));
+  if (unknown.length) throw new EngineError("company_binding_invalid", `Unsupported company binding fields: ${unknown.join(", ")}`);
+  return structuredClone(binding);
+}
 function verifyStoredApprovedPlan(stored, supplied, approval) {
   if (!stored) throw stale("Plan does not exist in company state");
   if (!verifyPlanHash(supplied) || stored.hash !== supplied.hash || stored.status !== "approved" || stored.approvedStateVersion !== approval?.stateVersion || JSON.stringify(stored.approval) !== JSON.stringify(approval)) throw stale("Plan or durable approval differs from the reviewed state");
@@ -203,6 +210,7 @@ function defaultOperations() {
     .register("inspect_realisation", async (input, context) => context.registry.realisations.find(item => item.id === input.realisationId) ?? null)
     .register("inspect_provider_binding", async (input, context) => context.registry.providers.find(item => item.family === input.primitiveFamily) ?? null)
     .register("list_activity", async (_input, context) => context.engine.listActivity(context.declaration, context.authorization))
+    .register("bind_company", async (input, context) => context.engine.recordCompanyBinding(context.declaration, input, context.authorization))
     .register("observe_company", async (_input, context) => context.engine.reconcile(context.declaration, context.authorization))
     .register("generate_plan", async (_input, context) => context.engine.plan(context.declaration, context.authorization))
     .register("apply_plan", async (input, context) => context.engine.apply(context.declaration, input.plan, input.approval, context.authorization))

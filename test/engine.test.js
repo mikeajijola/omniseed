@@ -210,6 +210,21 @@ test("durable state preserves binding, proposals and activity across engine rest
   assert.match(await readFile(path, "utf8"), /desired-a/);
 });
 
+test("company binding is an idempotent governed operation", async () => {
+  const bound = structuredClone(declaration);
+  bound.spec.operations.push({ id: "bind_company", capability: "customer_support", description: "Bind approved revision", input: {}, output: {}, mutation: true, permissions: ["company.bind"], approval: "policy", interfaces: ["machine"] });
+  const store = new MemoryStateStore(), engine = new OmniSeed({ store, providers: providers() });
+  const actor = { actorId: "reconciler", permissions: ["company.bind"] };
+  const input = { desiredRevision: "a".repeat(40), environment: "production" };
+  await engine.invokeOperation(bound, "bind_company", input, actor);
+  await engine.invokeOperation(bound, "bind_company", input, actor);
+  await assert.rejects(engine.invokeOperation(bound, "bind_company", { desiredRevision: input.desiredRevision, permissions: ["*"] }, actor), error => error.code === "company_binding_invalid");
+  const state = await store.load("acme");
+  assert.equal(state.version, 1);
+  assert.equal(state.binding.desiredRevision, input.desiredRevision);
+  assert.equal(state.history.filter(item => item.type === "company_binding_recorded").length, 1);
+});
+
 test("desired and observed revisions remain separate and reconciliation advances observation deterministically", async () => {
   const path = join(await mkdtemp(join(tmpdir(), "omniseed-state-")), "state.json");
   const auth = { actorId: "operator", permissions: ["company.bind", "state.reconcile", "activity.read"] };
