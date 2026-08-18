@@ -8,7 +8,7 @@ export function compileCompany(declaration, runtimeState = emptyRuntimeState(dec
   for (const item of runtimeState.deployed ?? []) if (!desiredResources.has(resourceKey(item.family, item.id))) desiredResources.set(resourceKey(item.family, item.id), item.desired ?? item);
   const resources = [...desiredResources.values()].map(resource => {
     const key = resourceKey(resource.family, resource.id);
-    return { ...resource, provider: declaration.spec.providers[resource.family]?.provider ?? null, deployed: deployed.get(key) ?? null, observed: observed.get(key) ?? null };
+    return { ...resource, provider: providerIdForResource(declaration, resource), deployed: deployed.get(key) ?? null, observed: observed.get(key) ?? null };
   });
   const resourceById = new Map(resources.map(resource => [resource.id, resource]));
   const evidenceFor = resource => (runtimeState.evidence ?? []).filter(item => item.family === resource.family && item.resourceId === resource.id);
@@ -29,10 +29,15 @@ export function compileCompany(declaration, runtimeState = emptyRuntimeState(dec
     const state = requirements.every(item => item.covered) ? "realised" : requirements.some(item => item.covered) ? "partial" : "missing";
     return { ...capability, requirements, state, resolution, realisations: (capability.realisations ?? []).map(id => realisationById.get(id)).filter(Boolean) };
   });
-  const providers = primitiveFamilies.map(family => {
-    const id = declaration.spec.providers[family]?.provider;
-    return id ? providerRegistry.statusForDesired(family, id) : null;
-  }).filter(Boolean);
+  const providerSelections = primitiveFamilies.flatMap(family => {
+    const defaultProvider = declaration.spec.providers[family]?.provider;
+    const defaults = defaultProvider ? [{ family, providerId: defaultProvider, scope: "family", resourceId: null }] : [];
+    const overrides = resources
+      .filter(resource => resource.family === family && resource.provider && resource.provider !== defaultProvider)
+      .map(resource => ({ family, providerId: resource.provider, scope: "resource", resourceId: resource.id }));
+    return [...defaults, ...overrides];
+  });
+  const providers = providerSelections.map(selection => ({ ...providerRegistry.statusForDesired(selection.family, selection.providerId), scope: selection.scope, resourceId: selection.resourceId }));
   const operations = declaration.spec.operations.map(operation => operationRegistry.describe(operation, { providers }));
   const authority = declaration.spec.governance?.desiredState ?? null;
   const instance = { companyId: declaration.metadata.id, companyName: declaration.metadata.name, desiredState: authority, desiredRevision: binding.desiredRevision ?? null, omniformVersion: declaration.apiVersion, observedStateRevision: runtimeState.version, environment: binding.environment ?? "unspecified", deployment: binding.deployment ?? null };
@@ -42,4 +47,5 @@ export function compileCompany(declaration, runtimeState = emptyRuntimeState(dec
 
 export function emptyRuntimeState(companyId = null) { return { version: 0, companyId, binding: { desiredRevision: null, observedRevision: null }, deployed: [], observed: [], evidence: [], history: [], plans: [], companyChanges: [] }; }
 export function flattenResources(grouped = {}) { return Object.entries(grouped ?? {}).flatMap(([family, resources]) => resources.map(resource => ({ family, ...resource }))); }
+export function providerIdForResource(declaration, resource) { return resource.provider ?? declaration.spec.providers[resource.family]?.provider ?? null; }
 export const resourceKey = (family, id) => `${family}:${id}`;

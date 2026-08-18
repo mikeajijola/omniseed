@@ -150,6 +150,36 @@ test("canonical instance inspection explains realisation participants through pr
   assert.ok(after.realisations[0].participants.every(item => item.evidence.length > 0));
 });
 
+test("planning and inspection honour Provider selection on each primitive instance", async () => {
+  const canonical = structuredClone(declaration);
+  canonical.spec.resources = {
+    connectors: [
+      { id: "inbox", name: "Inbox", provider: "reference_connectors", offers: ["receive_request", "communicate_response"] },
+      { id: "customer_context", name: "Customer context", provider: "alternate_connectors", offers: ["access_context"] }
+    ],
+    agents: [{ id: "support_agent", name: "Support Agent", offers: ["understand_request"] }]
+  };
+  canonical.spec.capabilities[0].realisations = ["support_composition"];
+  canonical.spec.realisations = [{ id: "support_composition", name: "Support composition", capability: "customer_support", participants: [
+    { resource: "inbox", supplies: ["receive_request", "communicate_response"] },
+    { resource: "customer_context", supplies: ["access_context"] },
+    { resource: "support_agent", supplies: ["understand_request"] }
+  ] }];
+  const registry = providers().register(new ReferenceProvider({ id: "alternate_connectors", families: ["connectors"] }));
+  const engine = new OmniSeed({ store: new MemoryStateStore(), providers: registry });
+  const inspection = await engine.inspect(canonical);
+  assert.equal(inspection.resources.find(item => item.id === "inbox").provider, "reference_connectors");
+  assert.equal(inspection.resources.find(item => item.id === "customer_context").provider, "alternate_connectors");
+  assert.equal(inspection.realisations[0].participants.find(item => item.resource === "customer_context").provider, "alternate_connectors");
+  const plan = await engine.plan(canonical, owner);
+  assert.equal(plan.actions.find(item => item.resourceId === "inbox").provider, "reference_connectors");
+  assert.equal(plan.actions.find(item => item.resourceId === "customer_context").provider, "alternate_connectors");
+  const approval = await engine.approve(plan, plan.actions.map(item => item.id), owner);
+  const applied = await engine.apply(canonical, plan, approval, owner);
+  assert.equal(applied.state.deployed.find(item => item.id === "customer_context").provider, "alternate_connectors");
+  assert.equal(applied.state.evidence.find(item => item.resourceId === "customer_context").source, "alternate_connectors");
+});
+
 test("durable state preserves binding, proposals and activity across engine restart", async () => {
   const path = join(await mkdtemp(join(tmpdir(), "omniseed-state-")), "state.json");
   const permissions = { actorId: "operator", permissions: ["company.bind", "company_change.propose", "company_change.read", "activity.read"] };
