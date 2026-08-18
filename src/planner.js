@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { flattenResources, resourceKey } from "./compiler.js";
+import { flattenResources, providerIdForResource, resourceKey } from "./compiler.js";
 
 export function definitionHash(declaration) { return hash(stable(declaration)); }
 
@@ -9,7 +9,7 @@ export function createPlan(declaration, runtimeState, resolutions) {
   const resolved = resolutions.flatMap(item => item.recommendedRealisation?.resources ?? []);
   const desired = new Map([...explicit, ...resolved].map(resource => [resourceKey(resource.family, resource.id), resource]));
   const actions = [...desired.values()].filter(resource => !deployedKeys.has(resourceKey(resource.family, resource.id))).map(resource => {
-    const base = { action: "create", family: resource.family, resourceId: resource.id, provider: declaration.spec.providers[resource.family]?.provider ?? null, desired: resource, risk: resource.risk ?? "low" };
+    const base = { action: "create", family: resource.family, resourceId: resource.id, provider: providerIdForResource(declaration, resource), desired: resource, risk: resource.risk ?? "low" };
     return { id: `action_${hash(stable(base)).slice(0, 12)}`, ...base };
   });
   const gaps = resolutions.flatMap(item => item.unresolvedRequirements);

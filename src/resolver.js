@@ -22,6 +22,24 @@ export class CapabilityResolver {
         continue;
       }
       missingRequirements.push(requirement);
+      const exact = allowedResources.filter(resource => resource.family === requirement.primitiveFamily && (resource.offers ?? []).includes(requirement.id));
+      if (exact.length) {
+        for (const resource of exact) {
+          const desiredProvider = resource.provider ?? providerMap[requirement.primitiveFamily]?.provider;
+          if (!desiredProvider) {
+            unresolvedRequirements.push(gap(capability, requirement, "missing_provider", `No provider is selected for primitive ${resource.id}.`));
+            continue;
+          }
+          const status = providerRegistry.statusForDesired(requirement.primitiveFamily, desiredProvider);
+          if (status.state === "healthy") candidates.set(resourceKey(resource.family, resource.id), resource);
+          else {
+            const pg = providerGap(requirement.primitiveFamily, desiredProvider, status.state);
+            if (!providerGaps.some(item => item.primitiveFamily === pg.primitiveFamily && item.desiredProvider === pg.desiredProvider)) providerGaps.push(pg);
+            unresolvedRequirements.push(gap(capability, requirement, "missing_provider", pg.message, { ...pg, resourceId: resource.id }));
+          }
+        }
+        continue;
+      }
       const desiredProvider = providerMap[requirement.primitiveFamily]?.provider;
       if (!desiredProvider) {
         unresolvedRequirements.push(gap(capability, requirement, "missing_provider", "No provider is selected for this primitive family."));
@@ -34,14 +52,10 @@ export class CapabilityResolver {
         unresolvedRequirements.push(gap(capability, requirement, "missing_provider", pg.message, pg));
         continue;
       }
-      const exact = allowedResources.filter(resource => resource.family === requirement.primitiveFamily && (resource.offers ?? []).includes(requirement.id));
-      if (exact.length) exact.forEach(resource => candidates.set(resourceKey(resource.family, resource.id), resource));
-      else {
-        const provider = providerRegistry.get(desiredProvider);
-        const offering = provider.metadata.offerings.find(item => item.family === requirement.primitiveFamily && item.id === requirement.id);
-        if (offering?.resource) candidates.set(resourceKey(offering.resource.family, offering.resource.id), offering.resource);
-        else unresolvedRequirements.push(gap(capability, requirement, "missing_implementation", "The provider does not offer a realisation for this requirement."));
-      }
+      const provider = providerRegistry.get(desiredProvider);
+      const offering = provider.metadata.offerings.find(item => item.family === requirement.primitiveFamily && item.id === requirement.id);
+      if (offering?.resource) candidates.set(resourceKey(offering.resource.family, offering.resource.id), offering.resource);
+      else unresolvedRequirements.push(gap(capability, requirement, "missing_implementation", "The provider does not offer a realisation for this requirement."));
     }
     // Providers may advertise a composition resource for the capability itself
     // (for example, a Support Workflow) in addition to requirement offerings.
