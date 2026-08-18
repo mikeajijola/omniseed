@@ -29,6 +29,15 @@ export class OmniSeed {
     const active = activeDeclaration(declaration, state);
     const resolutions = this.resolver.resolveCompany({ declaration: active, currentState: state, providerRegistry: this.providers });
     const plan = createPlan(active, state, resolutions);
+    const existing = [...state.plans].reverse().find(item =>
+      ["pending", "empty"].includes(item.status) &&
+      item.stateVersion === state.version &&
+      item.definitionHash === plan.definitionHash &&
+      JSON.stringify(item.actions) === JSON.stringify(plan.actions) &&
+      JSON.stringify(item.gaps) === JSON.stringify(plan.gaps) &&
+      JSON.stringify(item.providerGaps) === JSON.stringify(plan.providerGaps)
+    );
+    if (existing) return structuredClone(existing);
     const next = await this.store.save({ ...state, plans: [...state.plans, plan], history: [...state.history, { type: "plan_generated", planId: plan.id, actorId: authorization.actorId, at: plan.createdAt }] }, state.version);
     if (next.version !== plan.stateVersion) throw new Error("Plan persistence version invariant failed");
     return plan;

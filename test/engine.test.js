@@ -90,8 +90,10 @@ test("exact plan approval applies only selected action IDs", async () => {
 test("state change makes a reviewed plan stale", async () => {
   const store = new MemoryStateStore(), engine = new OmniSeed({ store, providers: providers() });
   const p1 = await engine.plan(declaration, owner), approval = await engine.approve(p1, p1.actions.map(item => item.id), owner);
-  const p2 = await engine.plan(declaration, owner);
+  const state = await store.load("acme");
+  await store.save({ ...state, history: [...state.history, { type: "external_observation_recorded" }] }, state.version);
   await assert.rejects(engine.apply(declaration, p1, approval, owner), error => error.code === "plan_stale");
+  const p2 = await engine.plan(declaration, owner);
   const p2Approval = await engine.approve(p2, p2.actions.map(item => item.id), owner);
   const result = await engine.apply(declaration, p2, p2Approval, owner);
   assert.equal(result.plan.id, p2.id);
