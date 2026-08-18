@@ -96,7 +96,7 @@ test("provider crash rejects apply and leaves canonical state unchanged", { skip
   const plan = await engine.plan(declaration, owner), approval = await engine.approve(plan, plan.actions.map(item => item.id), owner);
   await assert.rejects(engine.apply(declaration, plan, approval, owner), error => error.code === "provider_process_crashed");
   const state = await store.load("protocol_test");
-  assert.equal(state.deployed.length, 0); assert.equal(state.observed.length, 0); assert.equal(state.evidence.length, 0); assert.equal(state.plans[0].status, "pending");
+  assert.equal(state.deployed.length, 0); assert.equal(state.observed.length, 0); assert.equal(state.evidence.length, 0); assert.equal(state.plans[0].status, "approved"); assert.equal(state.plans[0].approval.planHash, plan.hash);
 });
 test("request timeout closes startup without registering a Provider", { skip: !pythonAvailable }, async () => {
   await assert.rejects(connect("timeout", { requestTimeoutMs: 50 }), error => error.code === "provider_request_timeout");
@@ -114,7 +114,7 @@ test("invalid apply response cannot enter canonical state", { skip: !pythonAvail
   const plan = await engine.plan(declaration, owner), approval = await engine.approve(plan, plan.actions.map(item => item.id), owner);
   await assert.rejects(engine.apply(declaration, plan, approval, owner), error => error.code === "invalid_provider_response");
   const state = await store.load("protocol_test");
-  assert.equal(state.deployed.length, 0); assert.equal(state.evidence.length, 0); assert.equal(state.plans[0].status, "pending");
+  assert.equal(state.deployed.length, 0); assert.equal(state.evidence.length, 0); assert.equal(state.plans[0].status, "approved"); assert.equal(state.plans[0].approval.planHash, plan.hash);
 });
 test("unhealthy external Provider remains a truthful distinct state", { skip: !pythonAvailable }, async t => {
   const provider = await connect("unhealthy"); t.after(() => provider.shutdown());

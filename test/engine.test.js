@@ -87,6 +87,19 @@ test("exact plan approval applies only selected action IDs", async () => {
   assert.deepEqual(result.plan.appliedActionIds, selected);
 });
 
+test("plan approval and apply can be exercised by distinct authorised actors", async () => {
+  const engine = new OmniSeed({ store: new MemoryStateStore(), providers: providers() });
+  const planner = { actorId: "reconciler", permissions: ["plan.create"] };
+  const approver = { actorId: "reviewer", permissions: ["plan.approve"] };
+  const applier = { actorId: "runtime", permissions: ["plan.apply"] };
+  const plan = await engine.plan(declaration, planner);
+  const approval = await engine.approve(plan, plan.actions.map(item => item.id), approver);
+  const result = await engine.apply(declaration, plan, approval, applier);
+  assert.equal(result.plan.status, "applied");
+  assert.equal(approval.actorId, "reviewer");
+  assert.equal(result.state.history.at(-1).actorId, "runtime");
+});
+
 test("state change makes a reviewed plan stale", async () => {
   const store = new MemoryStateStore(), engine = new OmniSeed({ store, providers: providers() });
   const p1 = await engine.plan(declaration, owner), approval = await engine.approve(p1, p1.actions.map(item => item.id), owner);

@@ -49,16 +49,21 @@ export class OmniSeed {
     verifyStoredPlan(stored, plan);
     const actionIds = new Set(plan.actions.map(item => item.id));
     if (approvedActionIds.some(id => !actionIds.has(id))) throw new EngineError("approval_invalid", "Approval references an action outside the reviewed plan");
-    return { actorId: authorization.actorId, planId: plan.id, planHash: plan.hash, approvedActionIds: [...new Set(approvedActionIds)], permissions: [...authorization.permissions], approvedAt: new Date().toISOString() };
+    const approvedAt = new Date().toISOString();
+    const approval = { actorId: authorization.actorId, planId: plan.id, planHash: plan.hash, approvedActionIds: [...new Set(approvedActionIds)], permissions: [...authorization.permissions], approvedAt, stateVersion: state.version + 1 };
+    const approved = { ...stored, status: "approved", approval, approvedActionIds: approval.approvedActionIds, approvedStateVersion: approval.stateVersion };
+    const next = await this.store.save({ ...state, plans: state.plans.map(item => item.id === plan.id ? approved : item), history: [...state.history, { type: "plan_approved", planId: plan.id, planHash: plan.hash, actorId: authorization.actorId, actionIds: approval.approvedActionIds, at: approvedAt }] }, state.version);
+    if (next.version !== approval.stateVersion) throw new Error("Approval persistence version invariant failed");
+    return approval;
   }
   async apply(declaration, plan, approval, authorization) {
     authorize(authorization, ["plan.apply"]);
     const state = await this.store.load(declaration.metadata.id);
     const active = activeDeclaration(declaration, state);
-    if (state.version !== plan.stateVersion || definitionHash(active) !== plan.definitionHash) throw stale();
+    if (state.version !== approval?.stateVersion || definitionHash(active) !== plan.definitionHash) throw stale();
     const stored = state.plans.find(item => item.id === plan.id);
-    verifyStoredPlan(stored, plan);
-    if (!approval || approval.planId !== plan.id || approval.planHash !== plan.hash || approval.actorId !== authorization.actorId) throw new EngineError("approval_invalid", "Approval does not bind this actor to the reviewed plan");
+    verifyStoredApprovedPlan(stored, plan, approval);
+    if (!approval || approval.planId !== plan.id || approval.planHash !== plan.hash) throw new EngineError("approval_invalid", "Approval does not bind the exact reviewed plan");
     if (!(approval.permissions ?? []).includes("plan.approve")) throw new EngineError("approval_invalid", "Approval lacks plan.approve authorization context");
     const allowed = new Set(approval.approvedActionIds);
     if ([...allowed].some(id => !plan.actions.some(action => action.id === id))) throw new EngineError("approval_invalid", "Approval contains an unknown action");
@@ -185,6 +190,10 @@ export class OmniSeed {
 function verifyStoredPlan(stored, supplied) {
   if (!stored) throw stale("Plan does not exist in company state");
   if (!verifyPlanHash(supplied) || stored.hash !== supplied.hash || JSON.stringify(stored) !== JSON.stringify(supplied)) throw stale("Plan differs from the persisted reviewed plan");
+}
+function verifyStoredApprovedPlan(stored, supplied, approval) {
+  if (!stored) throw stale("Plan does not exist in company state");
+  if (!verifyPlanHash(supplied) || stored.hash !== supplied.hash || stored.status !== "approved" || stored.approvedStateVersion !== approval?.stateVersion || JSON.stringify(stored.approval) !== JSON.stringify(approval)) throw stale("Plan or durable approval differs from the reviewed state");
 }
 const stale = (message = "Definition or runtime state changed after plan review") => new EngineError("plan_stale", message);
 function defaultOperations() {
