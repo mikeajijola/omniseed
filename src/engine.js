@@ -3,6 +3,7 @@ import { createPlan, definitionHash, verifyPlanHash } from "./planner.js";
 import { authorize, EngineError, OperationRegistry } from "./operations.js";
 import { CapabilityResolver } from "./resolver.js";
 import { applyDefinitionPatch, createCompanyChangeProposal, previewCompanyChange, verifyCompanyChangeProposal } from "./company-change.js";
+import { isDeepStrictEqual } from "node:util";
 
 export class OmniSeed {
   constructor({ store, providers, resolver = new CapabilityResolver(), operations = defaultOperations(), companyRepository = null, binding = {} }) { this.store = store; this.providers = providers; this.resolver = resolver; this.operations = operations; this.companyRepository = companyRepository; this.binding = binding; }
@@ -190,7 +191,7 @@ export class OmniSeed {
 
 function verifyStoredPlan(stored, supplied) {
   if (!stored) throw stale("Plan does not exist in company state");
-  if (!verifyPlanHash(supplied) || stored.hash !== supplied.hash || JSON.stringify(stored) !== JSON.stringify(supplied)) throw stale("Plan differs from the persisted reviewed plan");
+  if (!verifyPlanHash(supplied) || stored.hash !== supplied.hash || !isDeepStrictEqual(stored, supplied)) throw stale("Plan differs from the persisted reviewed plan");
 }
 function normalizeBinding(binding) {
   if (!binding || typeof binding !== "object" || Array.isArray(binding)) throw new EngineError("company_binding_invalid", "Company binding must be an object");
@@ -200,7 +201,7 @@ function normalizeBinding(binding) {
 }
 function verifyStoredApprovedPlan(stored, supplied, approval) {
   if (!stored) throw stale("Plan does not exist in company state");
-  if (!verifyPlanHash(supplied) || stored.hash !== supplied.hash || stored.status !== "approved" || stored.approvedStateVersion !== approval?.stateVersion || JSON.stringify(stored.approval) !== JSON.stringify(approval)) throw stale("Plan or durable approval differs from the reviewed state");
+  if (!verifyPlanHash(supplied) || stored.hash !== supplied.hash || stored.status !== "approved" || stored.approvedStateVersion !== approval?.stateVersion || !isDeepStrictEqual(stored.approval, approval)) throw stale("Plan or durable approval differs from the reviewed state");
 }
 const stale = (message = "Definition or runtime state changed after plan review") => new EngineError("plan_stale", message);
 function defaultOperations() {

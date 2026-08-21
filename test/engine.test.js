@@ -124,6 +124,15 @@ test("plan approval and apply can be exercised by distinct authorised actors", a
   assert.equal(result.state.history.at(-1).actorId, "runtime");
 });
 
+test("durable JSON object key ordering does not invalidate an exact reviewed plan or approval", async () => {
+  const store = new JsonbLikeStateStore(), engine = new OmniSeed({ store, providers: providers() });
+  const plan = await engine.plan(declaration, owner);
+  const approval = await engine.approve(plan, plan.actions.map(item => item.id), owner);
+  const result = await engine.apply(declaration, plan, approval, owner);
+  assert.equal(result.plan.status, "applied");
+  assert.deepEqual(result.plan.appliedActionIds, plan.actions.map(item => item.id));
+});
+
 test("state change makes a reviewed plan stale", async () => {
   const store = new MemoryStateStore(), engine = new OmniSeed({ store, providers: providers() });
   const p1 = await engine.plan(declaration, owner), approval = await engine.approve(p1, p1.actions.map(item => item.id), owner);
@@ -269,3 +278,14 @@ test("durable store rejects cross-company state and optimistic write conflicts",
   await assert.rejects(store.load("other"), /company mismatch/);
   await assert.rejects(store.save(saved, 0), /State conflict/);
 });
+
+class JsonbLikeStateStore extends MemoryStateStore {
+  async load(companyId) { return canonicalObject(await super.load(companyId)); }
+  async save(state, expectedVersion) { return super.save(canonicalObject(state), expectedVersion); }
+}
+
+function canonicalObject(value) {
+  if (Array.isArray(value)) return value.map(canonicalObject);
+  if (value && typeof value === "object") return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalObject(value[key])]));
+  return value;
+}

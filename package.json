@@ -1,6 +1,6 @@
 {
   "name": "@omniseed/engine",
-  "version": "1.0.0-alpha.9",
+  "version": "1.0.0-alpha.10",
   "description": "Headless compiler, planner, provisioner and reconciler for Company-as-Code.",
   "repository": {
     "type": "git",
