@@ -78,9 +78,9 @@ export class OmniSeed {
       await provider.plan(action);
       const resource = await provider.apply(action);
       const deployment = { family: action.family, id: action.resourceId, provider: action.provider, desired: action.desired, ...resource };
-      deployed.push(deployment);
+      replaceCurrentResource(deployed, deployment);
       const observation = { family: action.family, id: action.resourceId, ...(await provider.observe(deployment)) };
-      observed.push(observation);
+      replaceCurrentResource(observed, observation);
       evidence.push(...observation.evidence.map(item => ({ ...item, family: action.family, resourceId: action.resourceId, observedAt: observation.checkedAt })));
       results.push({ action, deployment, observation });
     }
@@ -232,6 +232,12 @@ function defaultOperations() {
 }
 
 function participantSummary(item) { return { family: item.family, providerId: item.providerId, state: item.status.state, executesOperation: item.executesOperation }; }
+
+function replaceCurrentResource(resources, resource) {
+  const index = resources.findIndex(item => item.family === resource.family && item.id === resource.id);
+  if (index === -1) resources.push(resource);
+  else resources[index] = resource;
+}
 
 function activeDeclaration(declaration, state) { return state?.canonicalDefinition ?? declaration; }
 function requireProposal(state, proposalId) {

@@ -4,12 +4,16 @@ import { flattenResources, providerIdForResource, resourceKey } from "./compiler
 export function definitionHash(declaration) { return hash(stable(declaration)); }
 
 export function createPlan(declaration, runtimeState, resolutions) {
-  const deployedKeys = new Set((runtimeState.deployed ?? []).map(item => resourceKey(item.family, item.id)));
+  const deployed = new Map((runtimeState.deployed ?? []).map(item => [resourceKey(item.family, item.id), item]));
   const explicit = flattenResources(declaration.spec.resources);
   const resolved = resolutions.flatMap(item => item.recommendedRealisation?.resources ?? []);
   const desired = new Map([...explicit, ...resolved].map(resource => [resourceKey(resource.family, resource.id), resource]));
-  const actions = [...desired.values()].filter(resource => !deployedKeys.has(resourceKey(resource.family, resource.id))).map(resource => {
-    const base = { action: "create", family: resource.family, resourceId: resource.id, provider: providerIdForResource(declaration, resource), desired: resource, risk: resource.risk ?? "low" };
+  const actions = [...desired.values()].flatMap(resource => {
+    const existing = deployed.get(resourceKey(resource.family, resource.id));
+    const provider = providerIdForResource(declaration, resource);
+    const action = !existing ? "create" : stable(existing.desired) !== stable(resource) || existing.provider !== provider ? "update" : null;
+    if (!action) return [];
+    const base = { action, family: resource.family, resourceId: resource.id, provider, desired: resource, risk: resource.risk ?? "low" };
     return { id: `action_${hash(stable(base)).slice(0, 12)}`, ...base };
   });
   const gaps = resolutions.flatMap(item => item.unresolvedRequirements);

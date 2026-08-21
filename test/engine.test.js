@@ -87,6 +87,30 @@ test("exact plan approval applies only selected action IDs", async () => {
   assert.deepEqual(result.plan.appliedActionIds, selected);
 });
 
+test("changed desired resource configuration produces an update and replaces current deployed state", async () => {
+  const initial = structuredClone(declaration);
+  initial.spec.resources = { connectors: [{ id: "configured_connector", name: "Configured Connector", offers: [], spec: { release: "alpha.14", publicChat: false } }] };
+  const store = new MemoryStateStore(), engine = new OmniSeed({ store, providers: providers() });
+  const firstPlan = await engine.plan(initial, owner);
+  const firstAction = firstPlan.actions.find(item => item.resourceId === "configured_connector");
+  assert.equal(firstAction.action, "create");
+  const firstApproval = await engine.approve(firstPlan, [firstAction.id], owner);
+  await engine.apply(initial, firstPlan, firstApproval, owner);
+
+  const changed = structuredClone(initial);
+  changed.spec.resources.connectors[0].spec = { release: "alpha.15", publicChat: true };
+  const updatePlan = await engine.plan(changed, owner);
+  const update = updatePlan.actions.find(item => item.resourceId === "configured_connector");
+  assert.equal(update.action, "update");
+  assert.equal(update.desired.spec.release, "alpha.15");
+  const updateApproval = await engine.approve(updatePlan, [update.id], owner);
+  const applied = await engine.apply(changed, updatePlan, updateApproval, owner);
+  const current = applied.state.deployed.filter(item => item.id === "configured_connector");
+  assert.equal(current.length, 1);
+  assert.deepEqual(current[0].desired.spec, { release: "alpha.15", publicChat: true });
+  assert.equal(applied.state.observed.filter(item => item.id === "configured_connector").length, 1);
+});
+
 test("plan approval and apply can be exercised by distinct authorised actors", async () => {
   const engine = new OmniSeed({ store: new MemoryStateStore(), providers: providers() });
   const planner = { actorId: "reconciler", permissions: ["plan.create"] };
