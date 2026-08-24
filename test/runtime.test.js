@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseOmniform } from "@omniseed/omniform";
-import { assembleRuntime, HttpStateStore, MemoryStateStore, ReferenceProvider } from "../src/index.js";
+import { assembleRuntime, desiredResourcesForProvider, HttpStateStore, MemoryStateStore, ReferenceProvider } from "../src/index.js";
 
 const source = `apiVersion: omniform.org/v1alpha1
 kind: Company
@@ -43,6 +43,21 @@ test("same Omniform and equivalent installed Provider configuration produce the 
   assert.deepEqual(firstPlan.actions, secondPlan.actions);
   assert.deepEqual(first.desiredProviderBindings, second.desiredProviderBindings);
   assert.equal(firstPlan.actions[0].provider, "github");
+});
+
+test("Provider context contains only its approved desired resources across primitive families", () => {
+  const multiProviderDeclaration = structuredClone(declaration);
+  multiProviderDeclaration.spec.providers.connectors = { provider: "github" };
+  multiProviderDeclaration.spec.resources.connectors = [
+    { id: "operations", name: "Operations", offers: ["operation_access"] },
+    { id: "external", name: "External", provider: "vercel", offers: ["external_access"] }
+  ];
+  const github = desiredResourcesForProvider(multiProviderDeclaration, "github");
+  const vercel = desiredResourcesForProvider(multiProviderDeclaration, "vercel");
+  assert.deepEqual(github.map(item => `${item.family}:${item.id}`), ["workflows:reconcile_workflow", "connectors:operations"]);
+  assert.deepEqual(vercel.map(item => `${item.family}:${item.id}`), ["connectors:external"]);
+  github[0].id = "mutated";
+  assert.equal(multiProviderDeclaration.spec.resources.workflows[0].id, "reconcile_workflow");
 });
 
 test("runtime assembly reports uninstalled desired Providers without fabricating them", async () => {

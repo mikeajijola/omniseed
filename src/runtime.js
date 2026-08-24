@@ -14,12 +14,17 @@ export async function assembleRuntime({ declaration, store, providerHandles = []
   const connected = [];
   try {
     for (const configured of protocolProviders) {
+      const desiredResources = desiredResourcesForProvider(declaration, configured.id);
       const handle = await connectStdioProvider({
         command: configured.command,
         args: configured.args ?? [],
         expectedProviderId: configured.id,
         configuration: configured.configuration ?? {},
-        context: { companyId: declaration.metadata.id, ...(configured.context ?? {}) },
+        context: {
+          ...(configured.context ?? {}),
+          companyId: declaration.metadata.id,
+          desiredResources
+        },
         startupTimeoutMs: configured.startupTimeoutMs,
         requestTimeoutMs: configured.requestTimeoutMs,
         onDiagnostic
@@ -38,6 +43,20 @@ export async function assembleRuntime({ declaration, store, providerHandles = []
     desiredProviderBindings: desiredProviderBindings(declaration),
     close: async () => Promise.allSettled(registry.list().map(provider => provider.shutdown()))
   };
+}
+
+/**
+ * Return only the approved desired resources selected for one Provider.
+ *
+ * A Provider may implement several primitive-family contracts and may need to
+ * reconcile shared implementation resources across those contracts. Supplying
+ * this company-scoped subset avoids hidden Provider configuration while
+ * preventing access to desired resources owned by another Provider.
+ */
+export function desiredResourcesForProvider(declaration, providerId) {
+  return flattenResources(declaration.spec.resources)
+    .filter(resource => providerIdForResource(declaration, resource) === providerId)
+    .map(resource => structuredClone(resource));
 }
 
 export function desiredProviderBindings(declaration) {
