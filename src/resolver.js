@@ -74,8 +74,8 @@ export class CapabilityResolver {
 
   resolveCompany({ declaration, currentState, providerRegistry, policy, strategy }) {
     const availableResources = [...new Map([
-      ...flattenResources(declaration.spec.resources),
-      ...(currentState.deployed ?? []).map(item => item.desired ?? item)
+      ...(currentState.deployed ?? []).map(item => item.desired ?? item),
+      ...flattenResources(declaration.spec.resources)
     ].map(resource => [resourceKey(resource.family, resource.id), resource])).values()];
     return declaration.spec.capabilities.map(capability => this.resolveCapability({ capability, currentState, providerRegistry, availableResources, providerMap: declaration.spec.providers, realisations: declaration.spec.realisations ?? [], policy, strategy }));
   }

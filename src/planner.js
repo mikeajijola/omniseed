@@ -7,7 +7,9 @@ export function createPlan(declaration, runtimeState, resolutions) {
   const deployed = new Map((runtimeState.deployed ?? []).map(item => [resourceKey(item.family, item.id), item]));
   const explicit = flattenResources(declaration.spec.resources);
   const resolved = resolutions.flatMap(item => item.recommendedRealisation?.resources ?? []);
-  const desired = new Map([...explicit, ...resolved].map(resource => [resourceKey(resource.family, resource.id), resource]));
+  // Explicit approved desired state wins when a resolution refers to the same
+  // resource as a stale deployed snapshot.
+  const desired = new Map([...resolved, ...explicit].map(resource => [resourceKey(resource.family, resource.id), resource]));
   const actions = [...desired.values()].flatMap(resource => {
     const existing = deployed.get(resourceKey(resource.family, resource.id));
     const provider = providerIdForResource(declaration, resource);

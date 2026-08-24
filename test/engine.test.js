@@ -111,6 +111,36 @@ test("changed desired resource configuration produces an update and replaces cur
   assert.equal(applied.state.observed.filter(item => item.id === "configured_connector").length, 1);
 });
 
+test("explicit desired resource wins over its stale deployed resolution candidate", async () => {
+  const initial = structuredClone(declaration);
+  initial.spec.capabilities = [{
+    id: "operate_company",
+    name: "Operate Company",
+    requires: [{ id: "human_operating_interface", primitiveFamily: "connectors" }],
+    realisations: ["company_interface"]
+  }];
+  initial.spec.realisations = [{
+    id: "company_interface",
+    name: "Company Interface",
+    capability: "operate_company",
+    participants: [{ resource: "company_os", supplies: ["human_operating_interface"] }]
+  }];
+  initial.spec.operations = initial.spec.operations.map(operation => ({ ...operation, capability: "operate_company" }));
+  initial.spec.resources = { connectors: [{ id: "company_os", name: "Company OS", offers: ["human_operating_interface"], spec: { release: "alpha.16" } }] };
+  const store = new MemoryStateStore(), engine = new OmniSeed({ store, providers: providers() });
+  const firstPlan = await engine.plan(initial, owner);
+  const first = firstPlan.actions.find(item => item.resourceId === "company_os");
+  const approval = await engine.approve(firstPlan, [first.id], owner);
+  await engine.apply(initial, firstPlan, approval, owner);
+
+  const changed = structuredClone(initial);
+  changed.spec.resources.connectors[0].spec.release = "alpha.19";
+  const updatePlan = await engine.plan(changed, owner);
+  const update = updatePlan.actions.find(item => item.resourceId === "company_os");
+  assert.equal(update.action, "update");
+  assert.equal(update.desired.spec.release, "alpha.19");
+});
+
 test("plan approval and apply can be exercised by distinct authorised actors", async () => {
   const engine = new OmniSeed({ store: new MemoryStateStore(), providers: providers() });
   const planner = { actorId: "reconciler", permissions: ["plan.create"] };
