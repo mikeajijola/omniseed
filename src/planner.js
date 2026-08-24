@@ -13,9 +13,13 @@ export function createPlan(declaration, runtimeState, resolutions) {
   const actions = [...desired.values()].flatMap(resource => {
     const existing = deployed.get(resourceKey(resource.family, resource.id));
     const provider = providerIdForResource(declaration, resource);
-    const action = !existing ? "create" : stable(existing.desired) !== stable(resource) || existing.provider !== provider ? "update" : null;
+    const desiredRevision = runtimeState.binding?.desiredRevision ?? null;
+    const revisionBound = Boolean(resource.spec?.companyBinding);
+    const deployedRevision = existing?.attributes?.spec?.desiredRevision ?? null;
+    const revisionDrift = revisionBound && Boolean(desiredRevision) && deployedRevision !== desiredRevision;
+    const action = !existing ? "create" : stable(existing.desired) !== stable(resource) || existing.provider !== provider || revisionDrift ? "update" : null;
     if (!action) return [];
-    const base = { action, family: resource.family, resourceId: resource.id, provider, desired: resource, risk: resource.risk ?? "low" };
+    const base = { action, family: resource.family, resourceId: resource.id, provider, desired: resource, ...(revisionBound ? { context: { companyBinding: { desiredRevision } } } : {}), risk: resource.risk ?? "low" };
     return { id: `action_${hash(stable(base)).slice(0, 12)}`, ...base };
   });
   const gaps = resolutions.flatMap(item => item.unresolvedRequirements);

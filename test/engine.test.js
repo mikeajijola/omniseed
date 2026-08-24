@@ -141,6 +141,39 @@ test("explicit desired resource wins over its stale deployed resolution candidat
   assert.equal(update.desired.spec.release, "alpha.19");
 });
 
+test("Git revision drift produces an exact revision-bound interface update", async () => {
+  const company = structuredClone(declaration);
+  company.spec.resources = { connectors: [{ id: "company_os", name: "Company OS", offers: [], spec: { companyBinding: { companyId: "acme", repository: "https://github.com/example/company.git" } } }] };
+  const desiredRevision = "b".repeat(40);
+  const initialState = {
+    version: 3,
+    companyId: "acme",
+    binding: { desiredRevision, observedRevision: "a".repeat(40) },
+    deployed: [{ family: "connectors", id: "company_os", provider: "reference_connectors", desired: { family: "connectors", ...company.spec.resources.connectors[0] }, attributes: { spec: { desiredRevision: "a".repeat(40) } } }],
+    observed: [], evidence: [], history: [], plans: [], companyChanges: []
+  };
+  const plan = await new OmniSeed({ store: new MemoryStateStore(initialState), providers: providers() }).plan(company, owner);
+  const update = plan.actions.find(item => item.resourceId === "company_os");
+  assert.equal(update.action, "update");
+  assert.equal(update.context.companyBinding.desiredRevision, desiredRevision);
+  assert.equal(update.desired.spec.companyBinding.companyId, "acme");
+});
+
+test("a revision-bound interface produces no action after the deployed binding matches", async () => {
+  const company = structuredClone(declaration);
+  company.spec.resources = { connectors: [{ id: "company_os", name: "Company OS", offers: [], spec: { companyBinding: { companyId: "acme" } } }] };
+  const desiredRevision = "b".repeat(40), desired = { family: "connectors", ...company.spec.resources.connectors[0] };
+  const initialState = {
+    version: 3,
+    companyId: "acme",
+    binding: { desiredRevision, observedRevision: desiredRevision },
+    deployed: [{ family: "connectors", id: "company_os", provider: "reference_connectors", desired, attributes: { spec: { desiredRevision } } }],
+    observed: [], evidence: [], history: [], plans: [], companyChanges: []
+  };
+  const plan = await new OmniSeed({ store: new MemoryStateStore(initialState), providers: providers() }).plan(company, owner);
+  assert.equal(plan.actions.some(item => item.resourceId === "company_os"), false);
+});
+
 test("plan approval and apply can be exercised by distinct authorised actors", async () => {
   const engine = new OmniSeed({ store: new MemoryStateStore(), providers: providers() });
   const planner = { actorId: "reconciler", permissions: ["plan.create"] };
