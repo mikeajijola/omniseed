@@ -4,15 +4,17 @@ import { authorize, EngineError, OperationRegistry } from "./operations.js";
 import { CapabilityResolver } from "./resolver.js";
 import { applyDefinitionPatch, createCompanyChangeProposal, previewCompanyChange, verifyCompanyChangeProposal } from "./company-change.js";
 import { isDeepStrictEqual } from "node:util";
+import { associateCompanyWork, attachCompanyWorkSession, COMPANY_WORK_TERMINAL_STATES, createCompanyWorkRun, markCompanyWorkMutating, projectCompanyWorkRun, recordCompanyWorkEvent, transitionCompanyWorkRun } from "./company-work.js";
+import { MemoryCompanyWorkStore } from "./company-work-store.js";
 
 export class OmniSeed {
-  constructor({ store, providers, resolver = new CapabilityResolver(), operations = defaultOperations(), companyRepository = null, binding = {} }) { this.store = store; this.providers = providers; this.resolver = resolver; this.operations = operations; this.companyRepository = companyRepository; this.binding = binding; }
+  constructor({ store, workStore = new MemoryCompanyWorkStore(), providers, resolver = new CapabilityResolver(), operations = defaultOperations(), companyRepository = null, binding = {} }) { this.store = store; this.workStore = workStore; this.providers = providers; this.resolver = resolver; this.operations = operations; this.companyRepository = companyRepository; this.binding = binding; }
   async inspect(declaration) {
-    const state = await this.store.load(declaration.metadata.id);
+    const [state, workState] = await Promise.all([this.store.load(declaration.metadata.id), this.workStore.load(declaration.metadata.id)]);
     const active = activeDeclaration(declaration, state);
     const resolutions = this.resolver.resolveCompany({ declaration: active, currentState: state, providerRegistry: this.providers });
     const persistedBinding = Object.fromEntries(Object.entries(state.binding ?? {}).filter(([, value]) => value != null));
-    return { ...compileCompany(active, state, { providerRegistry: this.providers, resolutions, operationRegistry: this.operations, binding: { ...this.binding, ...persistedBinding } }), definitionHash: definitionHash(active) };
+    return { ...compileCompany(active, state, { providerRegistry: this.providers, resolutions, operationRegistry: this.operations, binding: { ...this.binding, ...persistedBinding } }), workRuns: workState.runs.map(projectCompanyWorkRun), definitionHash: definitionHash(active) };
   }
   async recordCompanyBinding(declaration, binding, authorization) {
     authorize(authorization, ["company.bind"]);
@@ -23,7 +25,60 @@ export class OmniSeed {
   }
   async listActivity(declaration, authorization) {
     authorize(authorization, ["activity.read"]);
-    return structuredClone((await this.store.load(declaration.metadata.id)).history ?? []);
+    const [runtime, work] = await Promise.all([this.store.load(declaration.metadata.id), this.workStore.load(declaration.metadata.id)]);
+    const workActivity = work.runs.flatMap(run => run.events.map(event => ({ ...event, workRunId: run.id, actorId: run.actorId })));
+    return structuredClone([...(runtime.history ?? []), ...workActivity].sort((left, right) => String(left.at ?? "").localeCompare(String(right.at ?? ""))));
+  }
+  async startCompanyWork(declaration, input, authorization) {
+    authorize(authorization, ["company_work.create"]);
+    const runtime = await this.store.load(declaration.metadata.id);
+    return this.#mutateCompanyWork(declaration.metadata.id, state => {
+      const existing = input?.idempotencyKey && state.runs.find(item => item.idempotencyKey === input.idempotencyKey);
+      if (existing) return { unchanged: true, result: projectCompanyWorkRun(existing) };
+      const run = createCompanyWorkRun({ declaration, intent: input?.intent, idempotencyKey: input?.idempotencyKey, actorId: authorization.actorId, desiredRevision: runtime.binding?.desiredRevision ?? this.binding.desiredRevision ?? null, observedRevision: runtime.binding?.observedRevision ?? null });
+      return {
+        state: { ...state, runs: [...state.runs, run] },
+        result: projectCompanyWorkRun(run),
+      };
+    });
+  }
+  async listCompanyWork(declaration, authorization) {
+    authorize(authorization, ["company_work.read"]);
+    return (await this.workStore.load(declaration.metadata.id)).runs.map(projectCompanyWorkRun);
+  }
+  async getCompanyWork(declaration, runId, authorization, { includeRuntime = false } = {}) {
+    authorize(authorization, [includeRuntime ? "company_work.record" : "company_work.read"]);
+    const run = requireWorkRun(await this.workStore.load(declaration.metadata.id), runId);
+    return includeRuntime ? structuredClone(run) : projectCompanyWorkRun(run);
+  }
+  async attachCompanyWorkSession(declaration, runId, session, authorization) {
+    authorize(authorization, ["company_work.record"]);
+    return this.#updateCompanyWork(declaration, runId, authorization, run => attachCompanyWorkSession(run, session), "company_work_session_attached");
+  }
+  async recordCompanyWorkEvent(declaration, runId, input, authorization) {
+    authorize(authorization, ["company_work.record"]);
+    return this.#updateCompanyWork(declaration, runId, authorization, (run, activeRuns) => {
+      let next = input?.mutation === true ? markCompanyWorkMutating(run, activeRuns) : run;
+      next = recordCompanyWorkEvent(next, input?.event);
+      if (input?.associations) next = associateCompanyWork(next, input.associations);
+      if (input?.status) next = transitionCompanyWorkRun(next, input.status, { summary: input.summary });
+      return next;
+    }, "company_work_event_recorded", { quiet: true });
+  }
+  async continueCompanyWork(declaration, runId, input, authorization) {
+    authorize(authorization, ["company_work.create"]);
+    return this.#updateCompanyWork(declaration, runId, authorization, run => {
+      if (!["waiting_for_input", "waiting_for_company_approval", "waiting_for_checks", "observing"].includes(run.status)) throw new EngineError("company_work_invalid_state", `Company work cannot receive input while ${run.status}.`);
+      const message = String(input?.message ?? "").trim();
+      if (!message) throw new EngineError("company_work_invalid", "A follow-up message is required.");
+      let next = recordCompanyWorkEvent(run, { id: `${run.id}:input:${run.events.length}`, type: "company_work_input_received", summary: message });
+      next = transitionCompanyWorkRun(next, "running");
+      return next;
+    }, "company_work_resumed");
+  }
+  async cancelCompanyWork(declaration, runId, authorization) {
+    authorize(authorization, ["company_work.cancel"]);
+    return this.#updateCompanyWork(declaration, runId, authorization, run => transitionCompanyWorkRun(run, "cancelled"), "company_work_cancelled");
   }
   async plan(declaration, authorization) {
     authorize(authorization, ["plan.create"]);
@@ -43,6 +98,12 @@ export class OmniSeed {
     const next = await this.store.save({ ...state, plans: [...state.plans, plan], history: [...state.history, { type: "plan_generated", planId: plan.id, actorId: authorization.actorId, at: plan.createdAt }] }, state.version);
     if (next.version !== plan.stateVersion) throw new Error("Plan persistence version invariant failed");
     return plan;
+  }
+  async getPlan(declaration, planId, authorization) {
+    authorize(authorization, ["plan.read"]);
+    const plan = (await this.store.load(declaration.metadata.id)).plans.find(item => item.id === planId);
+    if (!plan) throw new EngineError("plan_not_found", `Plan does not exist: ${planId}`);
+    return structuredClone(plan);
   }
   async approve(plan, approvedActionIds, authorization) {
     authorize(authorization, ["plan.approve"]);
@@ -187,6 +248,23 @@ export class OmniSeed {
     if (executable.currentAvailability !== "available") throw new EngineError(executable.currentAvailability, `Operation is ${executable.currentAvailability}`, { operation: executable, providerGaps: registry.providerGaps });
     return this.operations.invoke(operation, input, { authorization, engine: this, declaration: active, registry });
   }
+  async #updateCompanyWork(declaration, runId, authorization, update, activityType, { quiet = false } = {}) {
+    return this.#mutateCompanyWork(declaration.metadata.id, state => {
+      const current = requireWorkRun(state, runId), next = update(current, state.runs);
+      if (isDeepStrictEqual(current, next)) return { unchanged: true, result: projectCompanyWorkRun(current) };
+      const runs = state.runs.map(item => item.id === runId ? next : item);
+      return { state: { ...state, runs }, result: projectCompanyWorkRun(next) };
+    });
+  }
+  async #mutateCompanyWork(companyId, mutation) {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const state = await this.workStore.load(companyId), outcome = mutation(state);
+      if (outcome.unchanged) return outcome.result;
+      try { await this.workStore.save(outcome.state, state.version); return outcome.result; }
+      catch (error) { if (!/Company work conflict/i.test(error.message) || attempt === 4) throw error; }
+    }
+    throw new EngineError("company_work_conflict", "Company work state could not be updated after concurrent writes.");
+  }
 }
 
 function verifyStoredPlan(stored, supplied) {
@@ -211,9 +289,15 @@ function defaultOperations() {
     .register("inspect_realisation", async (input, context) => context.registry.realisations.find(item => item.id === input.realisationId) ?? null)
     .register("inspect_provider_binding", async (input, context) => context.registry.providers.find(item => item.family === input.primitiveFamily) ?? null)
     .register("list_activity", async (_input, context) => context.engine.listActivity(context.declaration, context.authorization))
+    .register("start_company_work", async (input, context) => context.engine.startCompanyWork(context.declaration, input, context.authorization))
+    .register("list_company_work", async (_input, context) => context.engine.listCompanyWork(context.declaration, context.authorization))
+    .register("get_company_work", async (input, context) => context.engine.getCompanyWork(context.declaration, input.workRunId, context.authorization))
+    .register("continue_company_work", async (input, context) => context.engine.continueCompanyWork(context.declaration, input.workRunId, input, context.authorization))
+    .register("cancel_company_work", async (input, context) => context.engine.cancelCompanyWork(context.declaration, input.workRunId, context.authorization))
     .register("bind_company", async (input, context) => context.engine.recordCompanyBinding(context.declaration, input, context.authorization))
     .register("observe_company", async (_input, context) => context.engine.reconcile(context.declaration, context.authorization))
     .register("generate_plan", async (_input, context) => context.engine.plan(context.declaration, context.authorization))
+    .register("get_plan", async (input, context) => context.engine.getPlan(context.declaration, input.planId, context.authorization))
     .register("apply_plan", async (input, context) => context.engine.apply(context.declaration, input.plan, input.approval, context.authorization))
     .register("propose_company_change", async (input, context) => context.engine.proposeCompanyChange(context.declaration, input, context.authorization))
     .register("inspect_company_change", async (input, context) => input?.proposalId ? context.engine.getCompanyChangeProposal(context.declaration, input.proposalId, context.authorization) : context.engine.listCompanyChangeProposals(context.declaration, context.authorization))
@@ -247,3 +331,8 @@ function requireProposal(state, proposalId) {
   return proposal;
 }
 function replaceProposal(state, proposal) { return (state.companyChanges ?? []).map(item => item.id === proposal.id ? proposal : item); }
+function requireWorkRun(state, runId) {
+  const run = state.runs.find(item => item.id === runId);
+  if (!run) throw new EngineError("company_work_not_found", `Company work run does not exist: ${runId}`);
+  return run;
+}

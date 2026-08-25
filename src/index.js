@@ -8,5 +8,7 @@ export * from "./store.js";
 export * from "./provider-protocol.js";
 export * from "./transports/stdio-json-rpc.js";
 export * from "./company-change.js";
+export * from "./company-work.js";
+export * from "./company-work-store.js";
 export * from "./company-repository.js";
 export * from "./runtime.js";
