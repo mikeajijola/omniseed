@@ -301,6 +301,7 @@ function defaultOperations() {
     .register("apply_plan", async (input, context) => context.engine.apply(context.declaration, input.plan, input.approval, context.authorization))
     .register("propose_company_change", async (input, context) => context.engine.proposeCompanyChange(context.declaration, input, context.authorization))
     .register("inspect_company_change", async (input, context) => input?.proposalId ? context.engine.getCompanyChangeProposal(context.declaration, input.proposalId, context.authorization) : context.engine.listCompanyChangeProposals(context.declaration, context.authorization))
+    .register("preview_company_change", async (input, context) => context.engine.previewCompanyChange(context.declaration, input.proposalId, context.authorization))
     .register("approve_company_change", async (input, context) => context.engine.approveCompanyChange(context.declaration, input.proposalId, input.proposalHash, context.authorization))
     .register("reject_company_change", async (input, context) => context.engine.rejectCompanyChange(context.declaration, input.proposalId, input.reason, context.authorization))
     .register("apply_company_change", async (input, context) => context.engine.applyCompanyChange(context.declaration, input.proposalId, context.authorization))
