@@ -64,6 +64,53 @@ test("Provider families are canonical and one package may support independently 
   assert.equal(registry.statusForDesired("identity", "identity_only").state, "healthy");
 });
 
+test("inference is planned, observed and evidenced separately from the Agent using it", async () => {
+  const company = parseOmniform(`apiVersion: omniform.org/v1alpha1
+kind: Company
+metadata: { id: stewarded_company, name: Stewarded Company }
+spec:
+  providers:
+    agents: { provider: company_runtime }
+    inference: { provider: google }
+  capabilities:
+    - id: company_stewardship
+      name: Company Stewardship
+      requires:
+        - { id: stewardship_agency, primitiveFamily: agents }
+        - { id: language_reasoning, primitiveFamily: inference }
+      realisations: [lily_stewardship]
+  realisations:
+    - id: lily_stewardship
+      name: Lily stewardship
+      capability: company_stewardship
+      participants:
+        - { resource: lily, role: steward, supplies: [stewardship_agency] }
+        - { resource: lily_inference, supplies: [language_reasoning] }
+  resources:
+    agents:
+      - { id: lily, name: Lily, offers: [stewardship_agency], spec: { implementation: { framework: LiteLLM } } }
+    inference:
+      - { id: lily_inference, name: Lily inference, provider: google, offers: [language_reasoning], spec: { product: Gemini API, model: gemini-2.5-flash } }
+  operations:
+    - { id: inspect_company, capability: company_stewardship, description: Inspect company, input: {}, output: {}, mutation: false, permissions: [company.read], approval: none, interfaces: [agent, api] }
+`);
+  const registry = new ProviderRegistry()
+    .register(new ReferenceProvider({ id: "company_runtime", families: ["agents"] }))
+    .register(new ReferenceProvider({ id: "google", families: ["inference"] }));
+  const engine = new OmniSeed({ store: new MemoryStateStore(), providers: registry });
+  const plan = await engine.plan(company, owner);
+  assert.deepEqual(plan.actions.map(item => [item.family, item.provider]).sort(), [["agents", "company_runtime"], ["inference", "google"]]);
+  const approval = await engine.approve(plan, plan.actions.map(item => item.id), owner);
+  await engine.apply(company, plan, approval, owner);
+  const inspection = await engine.inspect(company);
+  const inference = inspection.realisations[0].participants.find(item => item.family === "inference");
+  assert.equal(inference.resource, "lily_inference");
+  assert.equal(inference.provider, "google");
+  assert.equal(inference.observed.status, "healthy");
+  assert.equal(inference.evidence[0].source, "google");
+  assert.equal(inspection.capabilities[0].state, "realised");
+});
+
 test("historical resources using removed vocabulary remain auditable without becoming new desired families", async () => {
   const historical = { version: 0, companyId: "acme", deployed: [{ family: "systems", id: "legacy_repository", provider: "legacy_github", providerResourceId: "github://repo/1" }], observed: [{ family: "systems", id: "legacy_repository", status: "healthy", checkedAt: "2026-08-10T00:00:00.000Z" }], evidence: [{ id: "legacy_evidence", source: "legacy_github", family: "systems", resourceId: "legacy_repository", observedAt: "2026-08-10T00:00:00.000Z" }], history: [], plans: [], companyChanges: [] };
   const registry = await new OmniSeed({ store: new MemoryStateStore(historical), providers: providers() }).inspect(declaration);
