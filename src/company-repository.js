@@ -144,18 +144,27 @@ function replaceDocumentRanges(source, document, patch) {
     const parent = document.getIn(path.slice(0, -1), true);
     const column = node.range[0] - (source.lastIndexOf("\n", node.range[0] - 1) + 1);
     const trailingWhitespace = source.slice(node.range[0], node.range[1]).match(/\s*$/)?.[0] ?? "";
-    const value = renderReplacement(document, change.value, Boolean(parent?.flow)).replaceAll("\n", `\n${" ".repeat(column)}`) + trailingWhitespace;
+    const value = renderReplacement(document, node, change.value, Boolean(parent?.flow)).replaceAll("\n", `\n${" ".repeat(column)}`) + trailingWhitespace;
     return { start: node.range[0], end: node.range[1], value };
   }).sort((left, right) => right.start - left.start);
   return replacements.reduce((result, replacement) => `${result.slice(0, replacement.start)}${replacement.value}${result.slice(replacement.end)}`, source);
 }
 
-function renderReplacement(document, value, forceFlow) {
+function renderReplacement(document, template, value, forceFlow) {
   const replacement = document.createNode(value);
   if (forceFlow) makeCollectionsFlow(replacement);
+  else if (isSeq(replacement) && isSeq(template)) inheritSequenceStyle(replacement, template);
   const fragment = new Document();
   fragment.contents = replacement;
   return fragment.toString({ lineWidth: 0 }).trimEnd();
+}
+
+function inheritSequenceStyle(replacement, template) {
+  replacement.flow = template.flow;
+  for (let index = 0; index < replacement.items.length; index += 1) {
+    const templateItem = template.items[index] ?? template.items.at(-1);
+    if (templateItem?.flow) makeCollectionsFlow(replacement.items[index]);
+  }
 }
 
 function makeCollectionsFlow(node) {
