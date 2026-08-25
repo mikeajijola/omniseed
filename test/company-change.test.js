@@ -19,6 +19,7 @@ spec:
   operations:
     - { id: propose_company_change, capability: customer_support, description: Propose a governed company definition change, input: {}, output: {}, mutation: true, permissions: [company_change.propose], approval: none, interfaces: [lily, ui, api, cli, agent, machine] }
     - { id: inspect_company_change, capability: customer_support, description: Inspect company change proposals, input: {}, output: {}, mutation: false, permissions: [company_change.read], approval: none, interfaces: [lily, ui, api, cli, agent, machine] }
+    - { id: preview_company_change, capability: customer_support, description: Preview an exact persisted company change, input: {}, output: {}, mutation: false, permissions: [company_change.read], approval: none, interfaces: [lily, ui, api, cli, agent, machine] }
     - { id: approve_company_change, capability: customer_support, description: Approve an exact company change, input: {}, output: {}, mutation: true, permissions: [company_change.approve], approval: none, interfaces: [ui, api, cli, agent, machine] }
     - { id: reject_company_change, capability: customer_support, description: Reject a company change, input: {}, output: {}, mutation: true, permissions: [company_change.reject], approval: none, interfaces: [ui, api, cli, agent, machine] }
     - { id: apply_company_change, capability: customer_support, description: Apply an approved company change, input: {}, output: {}, mutation: true, permissions: [company_change.apply], approval: required, interfaces: [ui, api, cli, agent, machine] }
@@ -66,6 +67,17 @@ test("preview is deterministic, validates and has no Provider side effects", asy
   assert.equal(preview.proposedDefinitionHash, proposal.proposedDefinitionHash);
   assert.deepEqual(preview.impact.capabilities.added, ["customer_triage"]);
   assert.deepEqual(preview.impact.newlyUnmetCapabilities, ["customer_triage"]);
+  assert.deepEqual(after, before);
+});
+
+test("preview_company_change is available through the ordinary governed operation registry", async () => {
+  const store = new MemoryStateStore(stateWithEvidence()), subject = new OmniSeed({ store, providers: new ProviderRegistry() });
+  const proposal = await subject.invokeOperation(declaration, "propose_company_change", request(), actors.lily);
+  const before = await store.load("acme");
+  const preview = await subject.invokeOperation(declaration, "preview_company_change", { proposalId: proposal.id }, { actorId: "reviewer", permissions: ["company_change.read"] });
+  const after = await store.load("acme");
+  assert.equal(preview.proposalId, proposal.id);
+  assert.deepEqual(preview.impact.capabilities.added, ["customer_triage"]);
   assert.deepEqual(after, before);
 });
 
