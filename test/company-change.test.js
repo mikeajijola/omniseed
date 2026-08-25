@@ -264,6 +264,35 @@ spec:
   assert.equal(applied.desired.spec.content.split("\n").filter(line => line.includes("steward_authority")).length, 1);
 });
 
+test("Provider-backed company repository preserves flow-style records in a replaced block sequence", async () => {
+  const yaml = `apiVersion: omniform.org/v1alpha1
+kind: Company
+metadata: { id: acme, name: Acme }
+spec:
+  providers: { policies: { provider: reference_policies } }
+  capabilities:
+    - { id: stewardship, name: Stewardship, requires: [{ id: authority, primitiveFamily: policies }] }
+  operations:
+    - { id: inspect_company, capability: stewardship, description: Inspect company, input: {}, output: {}, mutation: false, permissions: [], approval: none, interfaces: [api] }
+`;
+  const current = parseOmniform(yaml);
+  const operations = [...current.spec.operations, { id: "inspect_activity", capability: "stewardship", description: "Inspect activity", input: {}, output: {}, mutation: false, permissions: ["activity.read"], approval: "none", interfaces: ["api", "agent"] }];
+  const patch = [{ op: "replace", path: "/spec/operations", value: operations }];
+  const candidate = applyDefinitionPatch(current, patch);
+  let applied;
+  const provider = {
+    metadata: { id: "github_protocol", families: ["workflows"], operations: ["company.repository.inspect"] },
+    async invoke() { return { baseSha: "a".repeat(40), document: { path: "omniform.yaml", content: yaml } }; },
+    async validate() { return { valid: true, issues: [] }; }, async plan(action) { return { deterministic: true, actionId: action.id }; },
+    async apply(action) { applied = action; return { providerResourceId: "github://example/acme/pull/12", status: "proposed", attributes: { baseSha: "a".repeat(40), commitSha: "b".repeat(40), pullRequestNumber: 12, pullRequestUrl: "https://github.com/example/acme/pull/12" } }; },
+    async observe() { return { status: "healthy", checkedAt: "2026-08-25T00:00:00Z", evidence: [], snapshot: { pullRequest: { state: "open" } } }; }
+  };
+  await new ProviderGitCompanyRepository({ provider }).submit({ authority: { repository: "https://github.com/example/acme.git", branch: "main", path: "omniform.yaml", changeMode: "pull_request" }, candidate, proposal: { id: "ccp_operations", hash: "hash", reason: "Expose activity", proposedBy: { actorId: "lily" }, patch } });
+  assert.deepEqual(parseOmniform(applied.desired.spec.content), candidate);
+  const operationsText = applied.desired.spec.content.split("  operations:\n")[1];
+  assert.equal(operationsText.split("\n").filter(line => /^\s+- \{ (?:approval:|id:)/.test(line)).length, 2, operationsText);
+});
+
 test("Provider-backed company repository preserves indentation for nested object replacements", async () => {
   const yaml = `apiVersion: omniform.org/v1alpha1
 kind: Company
