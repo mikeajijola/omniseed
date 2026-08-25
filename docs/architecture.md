@@ -35,6 +35,18 @@ Calls carry the canonical company ID as their namespace and return Provider-neut
 
 Historical deployed resources and evidence may retain the family recorded when they were created, including removed alpha vocabulary. OmniSeed keeps those records auditable. New desired declarations and new Provider advertisements use only the canonical Omniform families; no runtime code silently remaps `systems` or `company_search`.
 
+## Durable company work
+
+An Agent conversation and company work are not the same thing. A semantic runtime such as Eve owns its durable model session, tool loop, continuation token, and raw event stream. OmniSeed owns the company-scoped operational projection: intent, actor, lifecycle state, ordinary operations invoked, governance pauses, proposal/plan references, Provider actions, observations, evidence, and outcome.
+
+`CompanyWorkRun` is runtime state, never desired state. It is persisted through the same optimistic store as Activity and observations, while Git remains the sole approved desired-state authority. Its public projection deliberately omits the Eve continuation token and hidden reasoning.
+
+The ordinary work operations are `start_company_work`, `list_company_work`, `get_company_work`, `continue_company_work`, and `cancel_company_work`. Runtime event recording requires `company_work.record` but is not exposed as a model tool. A declared steward can therefore operate through the existing plan and Company Change lifecycle without receiving an approval operation or a private Provider path.
+
+Read-only work may coexist. As soon as a run requests a mutating operation, OmniSeed marks it mutating and permits only one non-terminal mutating run for that company. Event IDs and request idempotency keys make stream replay safe; store CAS protects concurrent writers.
+
+Approval is company policy, not Agent-runtime HITL state. A work run may park at `waiting_for_company_approval` or `waiting_for_checks`; an independently recorded exact approval can wake the same semantic session. Apply and Provider-mediated merge still recheck the persisted plan/proposal, authority, revision, approvals, and checks.
+
 ## State and execution details
 
 Runtime state defaults to `.omniseed/state.json`. `JsonStateStore` uses optimistic versions and atomic replacement. `MemoryStateStore` is available for tests. The store contract is replaceable.
