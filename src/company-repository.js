@@ -125,9 +125,9 @@ function formatCandidateDocument(document, patch, candidate, expectedPath) {
   try {
     yaml = parseDocument(document.content, { keepSourceTokens: true, strict: true });
     if (yaml.errors.length) throw yaml.errors[0];
-    const formatted = patch.every(change => change.op === "replace" || change.op === "remove")
-      ? editDocumentRanges(document.content, yaml, patch)
-      : applyAndStringifyDocument(yaml, patch);
+    const formatted = editDocumentRanges(document.content, yaml, patch);
+    const syntax = parseDocument(formatted, { strict: true });
+    if (syntax.errors.length) throw syntax.errors[0];
     const reparsed = parseOmniform(formatted);
     if (serializeCanonical(reparsed) !== serializeCanonical(candidate)) throw new Error("formatted document differs from approved candidate");
     return formatted;
@@ -140,8 +140,9 @@ function editDocumentRanges(source, document, patch) {
   const replacements = patch.map(change => {
     const path = change.path.split("/").slice(1).map(segment => segment.replace(/~1/g, "/").replace(/~0/g, "~"));
     const node = document.getIn(path, true);
-    if (!node?.range) throw new Error(`${change.op} path does not exist in canonical document: ${change.path}`);
     const parent = document.getIn(path.slice(0, -1), true);
+    if (change.op === "add" && !node?.range) return additionRange(source, document, parent, path.at(-1), change.value, change.path);
+    if (!node?.range) throw new Error(`${change.op} path does not exist in canonical document: ${change.path}`);
     if (change.op === "remove") return removalRange(source, parent, node, change.path);
     const column = node.range[0] - (source.lastIndexOf("\n", node.range[0] - 1) + 1);
     const trailingWhitespace = source.slice(node.range[0], node.range[1]).match(/\s*$/)?.[0] ?? "";
@@ -152,6 +153,51 @@ function editDocumentRanges(source, document, patch) {
     if (replacements[index - 1].start < replacements[index].end) throw new Error("company change paths overlap in the canonical document");
   }
   return replacements.reduce((result, replacement) => `${result.slice(0, replacement.start)}${replacement.value}${result.slice(replacement.end)}`, source);
+}
+
+function additionRange(source, document, parent, key, value, path) {
+  if (!parent?.range || parent.flow) throw new Error(`add path is not inside a block collection in the canonical document: ${path}`);
+  if (isSeq(parent)) {
+    if (key !== "-" && (!/^\d+$/.test(key) || Number(key) > parent.items.length)) throw new Error(`add path has an invalid sequence position: ${path}`);
+    if (parent.items.length === 0) throw new Error(`add path targets an unsupported empty sequence: ${path}`);
+    const index = key === "-" ? parent.items.length : Number(key);
+    const template = parent.items[Math.min(index, parent.items.length - 1)];
+    const start = index === parent.items.length ? parent.range[1] : lineStart(source, parent.items[index].range[0]);
+    const indent = sequenceIndent(source, template);
+    const rendered = renderReplacement(document, template, value, false);
+    return { start, end: start, value: renderSequenceItem(indent, rendered) };
+  }
+  if (isMap(parent)) {
+    if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(key)) throw new Error(`add path has an unsupported mapping key: ${path}`);
+    if (parent.items.length === 0) throw new Error(`add path targets an unsupported empty mapping: ${path}`);
+    const template = parent.items.at(-1);
+    const indent = source.slice(lineStart(source, template.key.range[0]), template.key.range[0]);
+    const replacement = document.createNode(value);
+    if (template.value?.flow && (isMap(replacement) || isSeq(replacement))) makeCollectionsFlow(replacement);
+    else if (isSeq(replacement) && isSeq(template.value)) inheritSequenceStyle(replacement, template.value);
+    const fragment = new Document();
+    fragment.contents = replacement;
+    const rendered = fragment.toString({ lineWidth: 0 }).trimEnd();
+    return { start: parent.range[1], end: parent.range[1], value: renderMappingEntry(indent, key, rendered) };
+  }
+  throw new Error(`add path parent is not a collection in the canonical document: ${path}`);
+}
+
+function lineStart(source, offset) { return source.lastIndexOf("\n", offset - 1) + 1; }
+function sequenceIndent(source, item) {
+  const prefix = source.slice(lineStart(source, item.range[0]), item.range[0]);
+  const match = prefix.match(/^([ \t]*)-[ \t]*$/);
+  if (!match) throw new Error("sequence item has an unsupported layout in the canonical document");
+  return match[1];
+}
+function renderSequenceItem(indent, rendered) {
+  const lines = rendered.split("\n");
+  return `${indent}- ${lines[0]}${lines.length > 1 ? `\n${lines.slice(1).map(line => `${indent}  ${line}`).join("\n")}` : ""}\n`;
+}
+function renderMappingEntry(indent, key, rendered) {
+  const lines = rendered.split("\n");
+  if (lines.length === 1 && !/^(?:-|\?)(?:\s|$)/.test(lines[0])) return `${indent}${key}: ${lines[0]}\n`;
+  return `${indent}${key}:\n${lines.map(line => `${indent}  ${line}`).join("\n")}\n`;
 }
 
 function removalRange(source, parent, node, path) {
@@ -190,24 +236,6 @@ function makeCollectionsFlow(node) {
     node.flow = true;
     for (const item of node.items) makeCollectionsFlow(item.value);
   }
-}
-
-function applyAndStringifyDocument(document, patch) {
-  for (const change of patch) applyDocumentOperation(document, change);
-  return document.toString({ lineWidth: 0 });
-}
-
-function applyDocumentOperation(document, change) {
-  const path = change.path.split("/").slice(1).map(segment => segment.replace(/~1/g, "/").replace(/~0/g, "~"));
-  const parentPath = path.slice(0, -1), key = path.at(-1), parent = document.getIn(parentPath, true);
-  if (isSeq(parent)) {
-    if (change.op === "add") {
-      const index = key === "-" ? parent.items.length : Number(key);
-      parent.items.splice(index, 0, document.createNode(change.value));
-    } else if (change.op === "remove") parent.items.splice(Number(key), 1);
-    else document.setIn([...parentPath, Number(key)], change.value);
-  } else if (change.op === "remove") document.deleteIn(path);
-  else document.setIn(path, change.value);
 }
 
 /** Deterministic test/reference adapter. It records a PR-shaped submission and never merges it. */
