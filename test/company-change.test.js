@@ -305,6 +305,46 @@ spec:
   assert.equal(operationsText.split("\n").filter(line => /^\s+- \{ (?:approval:|id:)/.test(line)).length, 2, operationsText);
 });
 
+test("Provider-backed company repository preserves unrelated bytes for mixed replace and block-sequence removal", async () => {
+  const yaml = `# preserve header
+apiVersion: omniform.org/v1alpha1
+kind: Company
+metadata: { id: acme, name: Acme }
+spec:
+  providers: { connectors: { provider: reference_connectors } } # preserve provider formatting
+  capabilities:
+    - { id: support, name: Support, requires: [{ id: active_access, primitiveFamily: connectors }] }
+  resources:
+    connectors:
+      - id: obsolete
+        name: Obsolete connector
+        offers: [obsolete_access]
+      - { id: active, name: Active, offers: [active_access] }
+  operations:
+    - { id: inspect_company, capability: support, description: Inspect company, input: {}, output: {}, mutation: false, permissions: [], approval: none, interfaces: [api] }
+`;
+  const current = parseOmniform(yaml);
+  const patch = [
+    { op: "replace", path: "/metadata/name", value: "Acme Operating Company" },
+    { op: "remove", path: "/spec/resources/connectors/0" }
+  ];
+  const candidate = applyDefinitionPatch(current, patch);
+  let applied;
+  const provider = {
+    metadata: { id: "github_protocol", families: ["workflows"], operations: ["company.repository.inspect"] },
+    async invoke() { return { baseSha: "a".repeat(40), document: { path: "omniform.yaml", content: yaml } }; },
+    async validate() { return { valid: true, issues: [] }; }, async plan(action) { return { deterministic: true, actionId: action.id }; },
+    async apply(action) { applied = action; return { providerResourceId: "github://example/acme/pull/13", status: "proposed", attributes: { baseSha: "a".repeat(40), commitSha: "b".repeat(40), pullRequestNumber: 13, pullRequestUrl: "https://github.com/example/acme/pull/13" } }; },
+    async observe() { return { status: "healthy", checkedAt: "2026-08-25T00:00:00Z", evidence: [], snapshot: { pullRequest: { state: "open" } } }; }
+  };
+  await new ProviderGitCompanyRepository({ provider }).submit({ authority: { repository: "https://github.com/example/acme.git", branch: "main", path: "omniform.yaml", changeMode: "pull_request" }, candidate, proposal: { id: "ccp_mixed", hash: "hash", reason: "Remove obsolete connector", proposedBy: { actorId: "lily" }, patch } });
+  const expected = yaml
+    .replace("metadata: { id: acme, name: Acme }", "metadata: { id: acme, name: Acme Operating Company }")
+    .replace("      - id: obsolete\n        name: Obsolete connector\n        offers: [obsolete_access]\n", "");
+  assert.equal(applied.desired.spec.content, expected);
+  assert.deepEqual(parseOmniform(applied.desired.spec.content), candidate);
+});
+
 test("Provider-backed company repository preserves indentation for nested object replacements", async () => {
   const yaml = `apiVersion: omniform.org/v1alpha1
 kind: Company
