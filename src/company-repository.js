@@ -125,8 +125,8 @@ function formatCandidateDocument(document, patch, candidate, expectedPath) {
   try {
     yaml = parseDocument(document.content, { keepSourceTokens: true, strict: true });
     if (yaml.errors.length) throw yaml.errors[0];
-    const formatted = patch.every(change => change.op === "replace")
-      ? replaceDocumentRanges(document.content, yaml, patch)
+    const formatted = patch.every(change => change.op === "replace" || change.op === "remove")
+      ? editDocumentRanges(document.content, yaml, patch)
       : applyAndStringifyDocument(yaml, patch);
     const reparsed = parseOmniform(formatted);
     if (serializeCanonical(reparsed) !== serializeCanonical(candidate)) throw new Error("formatted document differs from approved candidate");
@@ -136,18 +136,31 @@ function formatCandidateDocument(document, patch, candidate, expectedPath) {
   }
 }
 
-function replaceDocumentRanges(source, document, patch) {
+function editDocumentRanges(source, document, patch) {
   const replacements = patch.map(change => {
     const path = change.path.split("/").slice(1).map(segment => segment.replace(/~1/g, "/").replace(/~0/g, "~"));
     const node = document.getIn(path, true);
-    if (!node?.range) throw new Error(`replace path does not exist in canonical document: ${change.path}`);
+    if (!node?.range) throw new Error(`${change.op} path does not exist in canonical document: ${change.path}`);
     const parent = document.getIn(path.slice(0, -1), true);
+    if (change.op === "remove") return removalRange(source, parent, node, change.path);
     const column = node.range[0] - (source.lastIndexOf("\n", node.range[0] - 1) + 1);
     const trailingWhitespace = source.slice(node.range[0], node.range[1]).match(/\s*$/)?.[0] ?? "";
     const value = renderReplacement(document, node, change.value, Boolean(parent?.flow)).replaceAll("\n", `\n${" ".repeat(column)}`) + trailingWhitespace;
     return { start: node.range[0], end: node.range[1], value };
   }).sort((left, right) => right.start - left.start);
+  for (let index = 1; index < replacements.length; index += 1) {
+    if (replacements[index - 1].start < replacements[index].end) throw new Error("company change paths overlap in the canonical document");
+  }
   return replacements.reduce((result, replacement) => `${result.slice(0, replacement.start)}${replacement.value}${result.slice(replacement.end)}`, source);
+}
+
+function removalRange(source, parent, node, path) {
+  if (!isSeq(parent) || parent.flow) throw new Error(`remove path is not a block sequence item in the canonical document: ${path}`);
+  const lineStart = source.lastIndexOf("\n", node.range[0] - 1) + 1;
+  const itemPrefix = source.slice(lineStart, node.range[0]);
+  if (!/^[ \t]*-[ \t]*$/.test(itemPrefix)) throw new Error(`remove path has an unsupported sequence layout in the canonical document: ${path}`);
+  const end = node.range[2] ?? node.range[1];
+  return { start: lineStart, end, value: "" };
 }
 
 function renderReplacement(document, template, value, forceFlow) {
