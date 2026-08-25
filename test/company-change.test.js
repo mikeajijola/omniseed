@@ -414,6 +414,58 @@ spec:
   assert.match(applied.desired.spec.content, /endpoint: https:\/\/example.com\n  operations:/);
 });
 
+test("Provider-backed company repository keeps additions narrow in hand-authored block collections", async () => {
+  const yaml = `# preserve company header
+apiVersion: omniform.org/v1alpha1
+kind: Company
+metadata: { id: acme, name: Acme }
+spec:
+  providers:
+    agents: { provider: vercel }
+  capabilities:
+    - id: stewardship
+      name: Stewardship
+      requires:
+        - { id: stewardship_agent, primitiveFamily: agents }
+      realisations: [primary_stewardship]
+  realisations:
+    - id: primary_stewardship
+      name: Primary stewardship
+      capability: stewardship
+      participants:
+        - { resource: steward, supplies: [stewardship_agent] }
+  resources:
+    agents:
+      - { id: steward, name: Steward, provider: vercel, offers: [stewardship_agent] }
+  operations:
+    - { id: inspect_company, capability: stewardship, description: Inspect company, input: {}, output: {}, mutation: false, permissions: [], approval: none, interfaces: [api] }
+`;
+  const current = parseOmniform(yaml);
+  const patch = [
+    { op: "add", path: "/spec/providers/inference", value: { provider: "google" } },
+    { op: "add", path: "/spec/capabilities/0/requires/-", value: { id: "stewardship_inference", primitiveFamily: "inference" } },
+    { op: "add", path: "/spec/realisations/0/participants/-", value: { resource: "steward_inference", supplies: ["stewardship_inference"] } },
+    { op: "add", path: "/spec/resources/inference", value: [{ id: "steward_inference", name: "Steward inference", provider: "google", offers: ["stewardship_inference"], spec: { product: "Gemini API", model: "gemini-2.5-flash" } }] }
+  ];
+  const candidate = applyDefinitionPatch(current, patch);
+  let applied;
+  const provider = {
+    metadata: { id: "github_protocol", families: ["workflows"], operations: ["company.repository.inspect"] },
+    async invoke() { return { baseSha: "a".repeat(40), document: { path: "omniform.yaml", content: yaml } }; },
+    async validate() { return { valid: true, issues: [] }; }, async plan(action) { return { deterministic: true, actionId: action.id }; },
+    async apply(action) { applied = action; return { providerResourceId: "github://example/acme/pull/14", status: "proposed", attributes: { baseSha: "a".repeat(40), commitSha: "b".repeat(40), pullRequestNumber: 14, pullRequestUrl: "https://github.com/example/acme/pull/14" } }; },
+    async observe() { return { status: "healthy", checkedAt: "2026-08-25T00:00:00Z", evidence: [], snapshot: { pullRequest: { state: "open" } } }; }
+  };
+  await new ProviderGitCompanyRepository({ provider }).submit({ authority: { repository: "https://github.com/example/acme.git", branch: "main", path: "omniform.yaml", changeMode: "pull_request" }, candidate, proposal: { id: "ccp_additions", hash: "hash", reason: "Add inference", proposedBy: { actorId: "lily" }, patch } });
+  const formatted = applied.desired.spec.content;
+  assert.deepEqual(parseOmniform(formatted), candidate);
+  assert.match(formatted, /^# preserve company header$/m);
+  assert.match(formatted, /^      realisations: \[primary_stewardship\]$/m);
+  assert.match(formatted, /^        - \{ resource: steward, supplies: \[stewardship_agent\] \}$/m);
+  assert.doesNotMatch(formatted, /\[ primary_stewardship \]/);
+  assert.equal(formatted.split("\n").filter(line => line.includes("stewardship_inference")).length, 3);
+});
+
 test("format mismatch is rejected before Provider validation or mutation", async () => {
   let providerCalls = 0;
   const provider = {
