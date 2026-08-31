@@ -13,3 +13,4 @@ export * from "./company-work.js";
 export * from "./company-work-store.js";
 export * from "./company-repository.js";
 export * from "./runtime.js";
+export * from "./company-snapshot.js";

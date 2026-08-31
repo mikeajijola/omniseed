@@ -1,0 +1,33 @@
+{
+  "registry": {
+    "definitionHash": "definition-acme-7",
+    "instance": {
+      "companyId": "acme",
+      "desiredRevision": "git-desired-7",
+      "observedRevision": "git-observed-6",
+      "observedStateRevision": 7
+    },
+    "capabilities": [
+      { "id": "website", "state": "partial" }
+    ],
+    "resources": [
+      {
+        "family": "connectors",
+        "id": "site",
+        "provider": "host",
+        "deployed": {
+          "providerResourceId": "host/site",
+          "attributes": { "token": "fixture-secret", "region": "eu" }
+        },
+        "observed": null
+      }
+    ]
+  },
+  "expectedRevision": "sha256:4d33369fd18047cb83b3f514afb7a47c457b46387d9180e1410aabcecd382b9f",
+  "outcomes": {
+    "create": "create",
+    "update": "update",
+    "noOp": "no-op",
+    "stale": "stale"
+  }
+}
