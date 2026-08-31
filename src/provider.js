@@ -26,6 +26,9 @@ export class InProcessProviderHandle {
   async remove(input, actor) { return this.invoke("remove", input, actor); }
   async search(input, actor) { return this.invoke("search", input, actor); }
   async retrieve(input, actor) { return this.invoke("retrieve", input, actor); }
+  async configure(configuration, context) { if (typeof this.provider.configure === "function") await this.provider.configure(configuration, context); this.status = this.provider.status; }
+  async connect(context) { if (typeof this.provider.connect === "function") await this.provider.connect(context); this.status = this.provider.status; }
+  async health() { return typeof this.provider.health === "function" ? this.provider.health() : { status: this.status.healthy ? "healthy" : "unhealthy" }; }
   async shutdown() { if (typeof this.provider.shutdown === "function") await this.provider.shutdown(); }
 }
 
@@ -73,8 +76,8 @@ export class ProviderRegistry {
 }
 
 export class ReferenceProvider {
-  constructor({ id, families, offerings = [], operations = [], configured = true, connected = true, healthy = true }) {
-    this.metadata = { id, name: id, version: "1", families, offerings, operations };
+  constructor({ id, families, offerings = [], operations = [], version = "1", configured = true, connected = true, healthy = true }) {
+    this.metadata = { id, name: id, version, families, offerings, operations };
     this.status = { implementation_available: true, configured, connected, healthy };
   }
   async validate(action) { return { valid: this.status.healthy && this.metadata.families.includes(action.family), issues: [] }; }

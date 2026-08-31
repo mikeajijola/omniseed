@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { parseOmniform } from "@omniseed/omniform";
-import { connectStdioProvider, MemoryStateStore, OmniSeed, ProviderRegistry, StdioJsonRpcTransport } from "../src/index.js";
+import { assembleRuntime, connectStdioProvider, MemoryStateStore, OmniSeed, ProviderRegistry, StdioJsonRpcTransport } from "../src/index.js";
 
 const python = process.env.PYTHON ?? "python3";
 const script = fileURLToPath(new URL("../examples/providers/python_reference_provider.py", import.meta.url));
@@ -70,6 +70,22 @@ test("existing in-process JavaScript Providers still use the normalized handle",
   };
   const handle = new ProviderRegistry().register(js).require("js");
   assert.equal(handle.kind, "in_process"); await handle.validate({ id: "a" }); assert.deepEqual(calls, [["validate", "a"]]);
+});
+
+test("generic discovery assembles a protocol-backed implementation through the normalized handle", async () => {
+  const claim = {
+    manifest: {
+      manifestVersion: "1.0", id: "python_reference", organisation: "Python Reference", version: "1.0.0", engineCompatibility: ">=1.0.0 <2.0.0",
+      primitiveFamilies: ["connectors"], implementations: [{ family: "connectors", products: ["protocol test double"] }],
+      operations: ["echo"], configurationSchema: "./configuration.schema.json", observationTypes: ["provider_status"], evidenceTypes: ["provider_status"], permissions: []
+    },
+    load: ({ configuration, context }) => connectStdioProvider({ command: "python3", args: [script], expectedProviderId: "python_reference", configuration, context })
+  };
+  const runtime = await assembleRuntime({ declaration, store: new MemoryStateStore(), providerImplementations: [claim] });
+  assert.equal(runtime.providers.get("python_reference").kind, "protocol");
+  assert.equal(runtime.assemblyDiagnostics[0].state, "healthy");
+  assert.equal(runtime.assemblyDiagnostics[0].implementation.kind, "protocol");
+  await runtime.close();
 });
 
 test("missing executable fails before registration", async () => {
