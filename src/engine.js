@@ -6,6 +6,7 @@ import { applyDefinitionPatch, createCompanyChangeProposal, previewCompanyChange
 import { isDeepStrictEqual } from "node:util";
 import { associateCompanyWork, attachCompanyWorkSession, COMPANY_WORK_TERMINAL_STATES, createCompanyWorkRun, markCompanyWorkMutating, projectCompanyWorkRun, recordCompanyWorkEvent, transitionCompanyWorkRun } from "./company-work.js";
 import { MemoryCompanyWorkStore } from "./company-work-store.js";
+import { compareCompanySnapshot, createCompanySnapshot } from "./company-snapshot.js";
 
 export class OmniSeed {
   constructor({ store, workStore = new MemoryCompanyWorkStore(), providers, resolver = new CapabilityResolver(), operations = defaultOperations(), companyRepository = null, binding = {} }) { this.store = store; this.workStore = workStore; this.providers = providers; this.resolver = resolver; this.operations = operations; this.companyRepository = companyRepository; this.binding = binding; }
@@ -15,6 +16,10 @@ export class OmniSeed {
     const resolutions = this.resolver.resolveCompany({ declaration: active, currentState: state, providerRegistry: this.providers });
     const persistedBinding = Object.fromEntries(Object.entries(state.binding ?? {}).filter(([, value]) => value != null));
     return { ...compileCompany(active, state, { providerRegistry: this.providers, resolutions, operationRegistry: this.operations, binding: { ...this.binding, ...persistedBinding } }), workRuns: workState.runs.map(projectCompanyWorkRun), definitionHash: definitionHash(active) };
+  }
+  async getCompanySnapshot(declaration, authorization, current = null) {
+    authorize(authorization, ["company.read"]);
+    return compareCompanySnapshot(current, createCompanySnapshot(await this.inspect(declaration)));
   }
   async recordCompanyBinding(declaration, binding, authorization) {
     authorize(authorization, ["company.bind"]);
@@ -288,6 +293,7 @@ function defaultOperations() {
     .register("get_capability", async (input, context) => context.registry.capabilities.find(item => item.id === input.capabilityId) ?? null)
     .register("inspect_realisation", async (input, context) => context.registry.realisations.find(item => item.id === input.realisationId) ?? null)
     .register("inspect_provider_binding", async (input, context) => context.registry.providers.find(item => item.family === input.primitiveFamily) ?? null)
+    .register("get_company_snapshot", async (input, context) => context.engine.getCompanySnapshot(context.declaration, context.authorization, input?.current ?? null))
     .register("list_activity", async (_input, context) => context.engine.listActivity(context.declaration, context.authorization))
     .register("start_company_work", async (input, context) => context.engine.startCompanyWork(context.declaration, input, context.authorization))
     .register("list_company_work", async (_input, context) => context.engine.listCompanyWork(context.declaration, context.authorization))

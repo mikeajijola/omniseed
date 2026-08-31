@@ -31,6 +31,8 @@ Company Change Proposals are persisted separately from Provider execution plans.
 
 Inspection exposes canonical instance binding separately from company identity: Git authority and merged desired revision, Omniform version, environment, deployment identity, and observed-state revision. It also projects named realisations with primitive participants, family Provider bindings, deployment, observation, and evidence. The endpoint or OS process never defines company identity.
 
+Engine also owns the redacted current snapshot consumed by UI and OS caches. Snapshot revisions identify the complete safe projection; missing observations are explicit and never fabricated. Consumer synchronization is create, update, no-op, or stale as documented in [`company-snapshots.md`](company-snapshots.md).
+
 The runtime records a merged desired revision through the ordinary declared `bind_company` operation. The operation is permissioned, accepts only binding fields owned by the Engine, and is idempotent for an unchanged binding. A deployment or workflow therefore cannot smuggle authority into runtime state, and repeated reconciliation of the same approved revision does not create Activity churn.
 
 Declared operations compile into an executable registry containing implementation, permission, mutation, approval, provider dependency and availability truth. Declaration alone never makes an operation executable.
