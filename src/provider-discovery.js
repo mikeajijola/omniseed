@@ -13,9 +13,6 @@ export class ProviderImplementationCatalog {
     this.#claims.push(claim);
     return this;
   }
-  claimsFor(providerId, family) {
-    return this.#claims.filter(claim => claim.manifest.id === providerId && claim.manifest.primitiveFamilies.includes(family));
-  }
   resolve(providerId, families, engineVersion) {
     const identified = this.#claims.filter(claim => claim.manifest.id === providerId);
     if (!identified.length) throw discoveryError("provider_implementation_unavailable", `No installed implementation claim is available for Provider ${providerId}`, { providerId, families });
@@ -74,7 +71,7 @@ export function validateProviderManifest(manifest) {
   if (manifest.manifestVersion !== providerPackageManifestVersion) throw discoveryError("provider_manifest_incompatible", `Provider manifest version ${manifest.manifestVersion ?? "missing"} is not supported`, { expected: providerPackageManifestVersion, actual: manifest.manifestVersion });
   if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(manifest.version)) throw discoveryError("provider_manifest_invalid", "Provider manifest version must be semantic versioning");
   if (!Array.isArray(manifest.primitiveFamilies) || !manifest.primitiveFamilies.length || manifest.primitiveFamilies.some(family => !primitiveFamilies.includes(family))) throw discoveryError("provider_manifest_invalid", "Provider manifest requires canonical primitiveFamilies");
-  if (!Array.isArray(manifest.implementations) || manifest.implementations.some(item => !manifest.primitiveFamilies.includes(item?.family) || !Array.isArray(item.products) || !item.products.length)) throw discoveryError("provider_manifest_invalid", "Provider manifest requires product metadata for each implementation family");
+  if (!Array.isArray(manifest.implementations) || manifest.implementations.some(item => !manifest.primitiveFamilies.includes(item?.family) || !Array.isArray(item.products) || !item.products.length || item.products.some(product => typeof product !== "string" || !product))) throw discoveryError("provider_manifest_invalid", "Provider manifest requires product metadata for each implementation family");
   const described = new Set(manifest.implementations.map(item => item.family));
   if (manifest.primitiveFamilies.some(family => !described.has(family))) throw discoveryError("provider_manifest_invalid", "Provider manifest must describe products for every advertised primitive family");
   for (const field of ["operations", "observationTypes", "evidenceTypes", "permissions"]) if (!Array.isArray(manifest[field]) || manifest[field].some(item => typeof item !== "string" || !item)) throw discoveryError("provider_manifest_invalid", `Provider manifest requires ${field} as an array of strings`);
