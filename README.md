@@ -134,4 +134,4 @@ Providers may run inside Node.js or in a separate process through the language-n
 
 OmniSeed is in Generation 1 and early development.
 
-Licensing has not been decided. The package does not declare a license yet.
+OmniSeed is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
