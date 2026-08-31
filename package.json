@@ -2,6 +2,7 @@
   "name": "@omniseed/engine",
   "version": "1.0.0-alpha.20",
   "description": "Headless compiler, planner, provisioner and reconciler for Company-as-Code.",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/mikeajijola/omniseed.git"
