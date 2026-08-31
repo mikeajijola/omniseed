@@ -6,6 +6,7 @@ export * from "./resolver.js";
 export * from "./operations.js";
 export * from "./store.js";
 export * from "./provider-protocol.js";
+export * from "./provider-discovery.js";
 export * from "./transports/stdio-json-rpc.js";
 export * from "./company-change.js";
 export * from "./company-work.js";
