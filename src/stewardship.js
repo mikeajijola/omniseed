@@ -6,6 +6,9 @@ export const stewardshipReason = (code, message, details = {}) => ({ allowed: fa
 export function compileStewardshipProfile(declaration, runtime = {}, now = new Date()) {
   const declared = declaration.spec.stewardship?.autonomy;
   if (!declared) return null;
+  const mandatory = ["validation", "independentReview", "unchangedHead", "successfulChecks"];
+  const disabled = mandatory.filter(gate => declared.gates?.[gate] !== true);
+  if (String(declared.mode ?? "").startsWith("autonomous") && disabled.length) throw new EngineError("stewardship_policy_unsafe", `Autonomous stewardship requires mandatory safety gates: ${disabled.join(", ")}.`, { disabledGates: disabled });
   const control = runtime.stewardshipControl ?? { state: "disabled", enabledAt: null, expiresAt: null, pausedAt: null };
   const effectiveExpiry = control.expiresAt ?? declared.expiresAt ?? null;
   const expired = effectiveExpiry != null && Date.parse(effectiveExpiry) <= now.getTime();
@@ -41,13 +44,13 @@ export function evaluateStewardshipProposal(profile, proposal, { actorId, approv
   if (proposal.proposerActorId !== actorId) return stewardshipReason("stewardship_actor_mismatch", "The authenticated proposer does not match the proposal.");
   if (!approval) return stewardshipReason("stewardship_independent_review_required", "An independent exact-head approval is required.");
   if (approval.actorId === actorId) return stewardshipReason("stewardship_self_approval", "A proposer cannot approve its own change.");
-  if (approval.proposalId !== proposal.id || approval.headSha !== proposal.headSha) return stewardshipReason("stewardship_changed_head", "Approval does not bind this proposal and exact head.");
+  if (approval.proposalId !== proposal.id || approval.proposalDigest !== proposal.digest || approval.headSha !== proposal.headSha) return stewardshipReason("stewardship_changed_head", "Approval does not bind this persisted proposal digest and exact observed head.");
   if (!checks.length || checks.some(check => check.status !== "successful")) return stewardshipReason("stewardship_checks_unsuccessful", "Every required check must be successful.");
   return { allowed: true, code: "stewardship_allowed", message: "Declared stewardship policy allows this exact proposal head.", exactHeadSha: proposal.headSha };
 }
 
-export function attestStewardshipApproval({ proposalId, headSha, actorId, outcome, reviewedAt = new Date().toISOString() }) {
-  if (!proposalId || !/^[0-9a-f]{40,64}$/i.test(headSha ?? "") || !actorId || outcome !== "approved") throw new EngineError("stewardship_approval_invalid", "Approval requires an approved outcome bound to a proposal and exact head SHA.");
-  const payload = { proposalId, headSha: headSha.toLowerCase(), actorId, outcome, reviewedAt };
+export function attestStewardshipApproval({ proposalId, proposalDigest, headSha, observationId, actorId, outcome, reviewedAt = new Date().toISOString() }) {
+  if (!proposalId || !/^[0-9a-f]{64}$/i.test(proposalDigest ?? "") || !/^[0-9a-f]{40,64}$/i.test(headSha ?? "") || !observationId || !actorId || outcome !== "approved") throw new EngineError("stewardship_approval_invalid", "Approval requires an approved outcome bound to a persisted proposal digest and verified exact-head observation.");
+  const payload = { proposalId, proposalDigest: proposalDigest.toLowerCase(), headSha: headSha.toLowerCase(), observationId, actorId, outcome, reviewedAt };
   return { ...payload, attestation: createHash("sha256").update(JSON.stringify(payload)).digest("hex") };
 }

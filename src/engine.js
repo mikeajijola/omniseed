@@ -43,25 +43,43 @@ export class OmniSeed {
   }
   async recordStewardshipApproval(declaration, input, authorization) {
     authorize(authorization, ["stewardship.review"]);
-    const state = await this.store.load(declaration.metadata.id), approval = attestStewardshipApproval({ ...input, actorId: authorization.actorId });
-    const existing = (state.stewardshipApprovals ?? []).find(item => item.proposalId === approval.proposalId && item.headSha === approval.headSha && item.actorId === approval.actorId && item.outcome === approval.outcome);
+    const state = await this.store.load(declaration.metadata.id), proposal = verifiedStewardshipProposal(state, input.proposalId, activeDeclaration(declaration, state));
+    const observation = verifiedStewardshipObservation(state, input.observationId, proposal);
+    const approval = attestStewardshipApproval({ proposalId: proposal.id, proposalDigest: proposal.hash, headSha: observation.headSha, observationId: observation.id, outcome: input.outcome, actorId: authorization.actorId });
+    const existing = (state.stewardshipApprovals ?? []).find(item => item.proposalId === approval.proposalId && item.proposalDigest === approval.proposalDigest && item.headSha === approval.headSha && item.observationId === approval.observationId && item.actorId === approval.actorId && item.outcome === approval.outcome);
     if (existing) return existing;
     await this.store.save({ ...state, stewardshipApprovals: [...(state.stewardshipApprovals ?? []), approval], history: [...state.history, { type: "stewardship_exact_head_approved", proposalId: approval.proposalId, headSha: approval.headSha, actorId: approval.actorId, at: approval.reviewedAt }] }, state.version);
     return approval;
   }
-  async evaluateStewardship(declaration, proposal, checks, authorization) {
+  async evaluateStewardship(declaration, input, authorization) {
     authorize(authorization, ["stewardship.propose"]);
-    const state = await this.store.load(declaration.metadata.id), profile = compileStewardshipProfile(activeDeclaration(declaration, state), state);
-    const existing = (state.stewardshipEvaluations ?? []).find(item => item.proposalId === proposal.id && item.headSha === proposal.headSha && item.actorId === authorization.actorId);
+    const state = await this.store.load(declaration.metadata.id), active = activeDeclaration(declaration, state), profile = compileStewardshipProfile(active, state);
+    const persisted = verifiedStewardshipProposal(state, input.proposalId, active), observation = verifiedStewardshipObservation(state, input.observationId, persisted);
+    const proposal = deriveStewardshipFacts(persisted, observation);
+    const existing = (state.stewardshipEvaluations ?? []).find(item => item.proposalId === proposal.id && item.proposalDigest === proposal.digest && item.headSha === proposal.headSha && item.observationId === observation.id && item.actorId === authorization.actorId);
     if (existing) return structuredClone(existing.decision);
-    const approval = [...(state.stewardshipApprovals ?? [])].reverse().find(item => item.proposalId === proposal.id && item.headSha === proposal.headSha);
-    const decision = evaluateStewardshipProposal(profile, proposal, { actorId: authorization.actorId, approval, checks });
+    const approval = [...(state.stewardshipApprovals ?? [])].reverse().find(item => item.proposalId === proposal.id && item.proposalDigest === proposal.digest && item.headSha === proposal.headSha);
+    const decision = evaluateStewardshipProposal(profile, proposal, { actorId: authorization.actorId, approval, checks: observation.checks });
     if (!decision.allowed) return decision;
-    const at = new Date().toISOString(), actionCount = proposal.actionCount ?? 1, repairRoundCount = proposal.repairRoundCount ?? 0;
+    const at = new Date().toISOString(), actionCount = proposal.actionCount, repairRoundCount = proposal.repairRoundCount;
     const usage = { ...profile.usage, active: profile.usage.active + 1, dailyChanges: profile.usage.dailyChanges + 1, actions: profile.usage.actions + actionCount, repairRounds: profile.usage.repairRounds + repairRoundCount };
-    const evaluation = { proposalId: proposal.id, headSha: proposal.headSha, actorId: authorization.actorId, actionCount, repairRoundCount, at, decision };
+    const evaluation = { proposalId: proposal.id, proposalDigest: proposal.digest, headSha: proposal.headSha, observationId: observation.id, actorId: authorization.actorId, actionCount, repairRoundCount, lease: { status: "active", acquiredAt: at, expiresAt: new Date(Date.parse(at) + 60 * 60 * 1000).toISOString() }, at, decision };
     await this.store.save({ ...state, stewardshipUsage: usage, stewardshipEvaluations: [...(state.stewardshipEvaluations ?? []), evaluation], history: [...state.history, { type: "stewardship_proposal_allowed", proposalId: proposal.id, headSha: proposal.headSha, actorId: authorization.actorId, actionCount, repairRoundCount, at }] }, state.version);
     return decision;
+  }
+  async completeStewardship(declaration, input, authorization) {
+    authorize(authorization, ["stewardship.propose"]);
+    if (!["completed", "failed", "cancelled"].includes(input.outcome)) throw new EngineError("stewardship_completion_invalid", "Completion outcome must be completed, failed, or cancelled.");
+    const state = await this.store.load(declaration.metadata.id);
+    const index = (state.stewardshipEvaluations ?? []).findIndex(item => item.proposalId === input.proposalId && item.actorId === authorization.actorId);
+    if (index < 0) throw new EngineError("stewardship_lease_not_found", "No active stewardship lease exists for this proposal and actor.");
+    const current = state.stewardshipEvaluations[index];
+    if (current.lease?.status !== "active") return structuredClone(current.lease);
+    const at = new Date().toISOString(), evaluations = structuredClone(state.stewardshipEvaluations);
+    evaluations[index].lease = { ...current.lease, status: input.outcome, releasedAt: at, evidence: [...new Set(input.evidence ?? [])] };
+    const usage = { ...(state.stewardshipUsage ?? {}), active: Math.max(0, (state.stewardshipUsage?.active ?? 0) - 1) };
+    await this.store.save({ ...state, stewardshipUsage: usage, stewardshipEvaluations: evaluations, history: [...state.history, { type: `stewardship_${input.outcome}`, proposalId: input.proposalId, actorId: authorization.actorId, evidence: evaluations[index].lease.evidence, at }] }, state.version);
+    return structuredClone(evaluations[index].lease);
   }
   async getCompanySnapshot(declaration, authorization, current = null) {
     authorize(authorization, ["company.read"]);
@@ -350,8 +368,9 @@ function defaultOperations() {
     .register("enable_stewardship", async (input, context) => context.engine.enableStewardship(context.declaration, input, context.authorization))
     .register("pause_stewardship", async (_input, context) => context.engine.setStewardshipState(context.declaration, "paused", context.authorization))
     .register("disable_stewardship", async (_input, context) => context.engine.setStewardshipState(context.declaration, "disabled", context.authorization))
-    .register("evaluate_stewardship_proposal", async (input, context) => context.engine.evaluateStewardship(context.declaration, input.proposal, input.checks, context.authorization))
+    .register("evaluate_stewardship_proposal", async (input, context) => context.engine.evaluateStewardship(context.declaration, input, context.authorization))
     .register("record_stewardship_review", async (input, context) => context.engine.recordStewardshipApproval(context.declaration, input, context.authorization))
+    .register("complete_stewardship_proposal", async (input, context) => context.engine.completeStewardship(context.declaration, input, context.authorization))
     .register("bind_company", async (input, context) => context.engine.recordCompanyBinding(context.declaration, input, context.authorization))
     .register("observe_company", async (_input, context) => context.engine.reconcile(context.declaration, context.authorization))
     .register("generate_plan", async (_input, context) => context.engine.plan(context.declaration, context.authorization))
@@ -390,6 +409,36 @@ function requireProposal(state, proposalId) {
   return proposal;
 }
 function replaceProposal(state, proposal) { return (state.companyChanges ?? []).map(item => item.id === proposal.id ? proposal : item); }
+
+function verifiedStewardshipProposal(state, proposalId, active) {
+  const proposal = requireProposal(state, proposalId);
+  if (!verifyCompanyChangeProposal(proposal)) throw new EngineError("company_change_tampered", "Persisted stewardship proposal content does not match its digest.");
+  if (proposal.companyId !== state.companyId || proposal.baseDefinitionHash !== definitionHash(active)) throw new EngineError("company_change_stale", "Persisted stewardship proposal is not bound to the current company definition.");
+  return proposal;
+}
+
+function verifiedStewardshipObservation(state, observationId, proposal) {
+  const observation = (state.stewardshipObservations ?? []).find(item => item.id === observationId);
+  if (!observation) throw new EngineError("stewardship_evidence_missing", "A persisted Provider-authenticated exact-head observation is required.");
+  if (observation.verified !== true || !["provider", "engine"].includes(observation.source) || observation.proposalId !== proposal.id || observation.proposalDigest !== proposal.hash) throw new EngineError("stewardship_evidence_unverified", "Observation is not verified and bound to the persisted proposal digest.");
+  const expectedHead = proposal.submission?.commit ?? proposal.submission?.headSha ?? null;
+  if (!expectedHead || String(observation.headSha).toLowerCase() !== String(expectedHead).toLowerCase()) throw new EngineError("stewardship_changed_head", "Observed head does not match the persisted repository submission head.");
+  const observed = Date.parse(observation.observedAt ?? ""), maxAgeMs = 15 * 60 * 1000;
+  if (!Number.isFinite(observed) || Date.now() - observed > maxAgeMs || observed > Date.now() + 60_000) throw new EngineError("stewardship_evidence_stale", "Exact-head repository/check observation is stale.");
+  if (!Array.isArray(observation.checks) || !observation.checks.length || observation.checks.some(check => typeof check?.status !== "string")) throw new EngineError("stewardship_evidence_unverified", "Verified observation must contain repository check results.");
+  return observation;
+}
+
+function deriveStewardshipFacts(proposal, observation) {
+  const categories = new Set();
+  const authorityTerms = new Set(["governance", "stewardship", "permissions", "approval", "requiredauthority", "duties", "providers"]);
+  for (const change of proposal.patch) {
+    const segments = change.path.split("/").slice(1).map(item => item.replace(/~1/g, "/").replace(/~0/g, "~").toLowerCase());
+    for (const segment of segments) categories.add(segment);
+    if (segments.some(segment => authorityTerms.has(segment))) categories.add("authority");
+  }
+  return { id: proposal.id, digest: proposal.hash, headSha: observation.headSha.toLowerCase(), proposerActorId: proposal.proposedBy.actorId, categories: [...categories].sort(), actionCount: proposal.patch.length, repairRoundCount: observation.repairRoundCount ?? 0 };
+}
 function requireWorkRun(state, runId) {
   const run = state.runs.find(item => item.id === runId);
   if (!run) throw new EngineError("company_work_not_found", `Company work run does not exist: ${runId}`);
