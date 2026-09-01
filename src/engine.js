@@ -71,7 +71,8 @@ export class OmniSeed {
     authorize(authorization, ["stewardship.propose"]);
     if (!["completed", "failed", "cancelled"].includes(input.outcome)) throw new EngineError("stewardship_completion_invalid", "Completion outcome must be completed, failed, or cancelled.");
     const state = await this.store.load(declaration.metadata.id);
-    const index = (state.stewardshipEvaluations ?? []).findIndex(item => item.proposalId === input.proposalId && item.actorId === authorization.actorId);
+    if (!input.observationId) throw new EngineError("stewardship_completion_invalid", "Completion requires the exact observation ID bound to the stewardship lease.");
+    const index = (state.stewardshipEvaluations ?? []).findIndex(item => item.proposalId === input.proposalId && item.observationId === input.observationId && item.actorId === authorization.actorId);
     if (index < 0) throw new EngineError("stewardship_lease_not_found", "No active stewardship lease exists for this proposal and actor.");
     const current = state.stewardshipEvaluations[index];
     if (current.lease?.status !== "active") return structuredClone(current.lease);

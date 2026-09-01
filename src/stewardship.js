@@ -6,9 +6,6 @@ export const stewardshipReason = (code, message, details = {}) => ({ allowed: fa
 export function compileStewardshipProfile(declaration, runtime = {}, now = new Date()) {
   const declared = declaration.spec.stewardship?.autonomy;
   if (!declared) return null;
-  const mandatory = ["validation", "independentReview", "unchangedHead", "successfulChecks"];
-  const disabled = mandatory.filter(gate => declared.gates?.[gate] !== true);
-  if (String(declared.mode ?? "").startsWith("autonomous") && disabled.length) throw new EngineError("stewardship_policy_unsafe", `Autonomous stewardship requires mandatory safety gates: ${disabled.join(", ")}.`, { disabledGates: disabled });
   const control = runtime.stewardshipControl ?? { state: "disabled", enabledAt: null, expiresAt: null, pausedAt: null };
   const effectiveExpiry = control.expiresAt ?? declared.expiresAt ?? null;
   const expired = effectiveExpiry != null && Date.parse(effectiveExpiry) <= now.getTime();
@@ -25,6 +22,14 @@ export function compileStewardshipProfile(declaration, runtime = {}, now = new D
     protectedCategories: [...declared.protectedCategories], duties: structuredClone(declared.duties), afterMerge: structuredClone(declared.afterMerge),
     usage: structuredClone(usage)
   };
+}
+
+export function assertStewardshipPolicySafe(declaration) {
+  const declared = declaration.spec.stewardship?.autonomy;
+  if (!declared) return;
+  const mandatory = ["validation", "independentReview", "unchangedHead", "successfulChecks"];
+  const disabled = mandatory.filter(gate => declared.gates?.[gate] !== true);
+  if (String(declared.mode ?? "").startsWith("autonomous") && disabled.length) throw new EngineError("stewardship_policy_unsafe", `Autonomous stewardship requires mandatory safety gates: ${disabled.join(", ")}.`, { disabledGates: disabled });
 }
 
 export function evaluateStewardshipProposal(profile, proposal, { actorId, approval, checks = [], now = new Date() } = {}) {
