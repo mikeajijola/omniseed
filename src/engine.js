@@ -25,21 +25,21 @@ export class OmniSeed {
   }
   async enableStewardship(declaration, { expiresAt }, authorization) {
     authorize(authorization, ["stewardship.control"]);
-    const state = await this.store.load(declaration.metadata.id), declared = declaration.spec.stewardship?.autonomy, now = new Date();
+    const state = await this.store.load(declaration.metadata.id), active = activeDeclaration(declaration, state), declared = active.spec.stewardship?.autonomy, now = new Date();
     if (!declared) throw new EngineError("stewardship_not_declared", "No autonomous stewardship profile is declared.");
     const expiry = Date.parse(expiresAt ?? "");
     if (!Number.isFinite(expiry) || expiry <= now.getTime() || (declared.expiresAt && expiry > Date.parse(declared.expiresAt))) throw new EngineError("stewardship_expiry_invalid", "Enablement requires a future expiry no later than the declared expiry.");
     const control = { state: "enabled", enabledAt: now.toISOString(), expiresAt: new Date(expiry).toISOString(), pausedAt: null };
     await this.store.save({ ...state, stewardshipControl: control, history: [...state.history, { type: "stewardship_enabled", actorId: authorization.actorId, expiresAt: control.expiresAt, at: control.enabledAt }] }, state.version);
-    return compileStewardshipProfile(declaration, { ...state, stewardshipControl: control }, now);
+    return compileStewardshipProfile(active, { ...state, stewardshipControl: control }, now);
   }
   async setStewardshipState(declaration, stateName, authorization) {
     authorize(authorization, ["stewardship.control"]);
     if (!["paused", "disabled"].includes(stateName)) throw new EngineError("stewardship_state_invalid", "Stewardship may only be paused or disabled through this operation.");
-    const state = await this.store.load(declaration.metadata.id), at = new Date().toISOString();
+    const state = await this.store.load(declaration.metadata.id), active = activeDeclaration(declaration, state), at = new Date().toISOString();
     const control = { ...(state.stewardshipControl ?? {}), state: stateName, pausedAt: stateName === "paused" ? at : null };
     await this.store.save({ ...state, stewardshipControl: control, history: [...state.history, { type: `stewardship_${stateName}`, actorId: authorization.actorId, at }] }, state.version);
-    return compileStewardshipProfile(declaration, { ...state, stewardshipControl: control });
+    return compileStewardshipProfile(active, { ...state, stewardshipControl: control });
   }
   async recordStewardshipApproval(declaration, input, authorization) {
     authorize(authorization, ["stewardship.review"]);
@@ -51,7 +51,7 @@ export class OmniSeed {
   }
   async evaluateStewardship(declaration, proposal, checks, authorization) {
     authorize(authorization, ["stewardship.propose"]);
-    const state = await this.store.load(declaration.metadata.id), profile = compileStewardshipProfile(declaration, state);
+    const state = await this.store.load(declaration.metadata.id), profile = compileStewardshipProfile(activeDeclaration(declaration, state), state);
     const approval = [...(state.stewardshipApprovals ?? [])].reverse().find(item => item.proposalId === proposal.id && item.headSha === proposal.headSha);
     return evaluateStewardshipProposal(profile, proposal, { actorId: authorization.actorId, approval, checks });
   }
