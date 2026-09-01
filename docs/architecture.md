@@ -45,7 +45,7 @@ Historical deployed resources and evidence may retain the family recorded when t
 
 ## Autonomous stewardship policy
 
-The Engine compiles `spec.stewardship.autonomy` into an inspectable effective profile and persists its operator-controlled enabled, paused, disabled, or expired state separately from desired state. Server-bound `stewardship.control`, `stewardship.review`, and `stewardship.propose` permissions protect control, independent exact-head approval, and evaluation. Decisions return stable reason codes; independent approval is bound to proposal ID and head SHA, and evaluation rechecks expiry, limits, protected categories, separation of duties, and non-empty successful checks. Provider executors receive an allowed exact-head decision but do not decide company policy.
+The Engine compiles `spec.stewardship.autonomy` into an inspectable effective profile and persists its operator-controlled enabled, paused, disabled, or expired state separately from desired state. Server-bound `stewardship.control`, `stewardship.review`, and `stewardship.propose` permissions protect control, independent exact-head approval, and evaluation. Decisions return stable reason codes; independent approval is bound to proposal ID and head SHA, and evaluation rechecks expiry, limits, protected categories, separation of duties, and non-empty successful checks. An allowed exact-head evaluation atomically consumes its concurrency, daily-change, action, and repair-round budgets and is idempotent for the same proposal head and proposer. Daily counters reset on the UTC day boundary. Provider executors receive an allowed exact-head decision but do not decide company policy.
 
 ## Durable company work
 

@@ -44,7 +44,7 @@ export class OmniSeed {
   async recordStewardshipApproval(declaration, input, authorization) {
     authorize(authorization, ["stewardship.review"]);
     const state = await this.store.load(declaration.metadata.id), approval = attestStewardshipApproval({ ...input, actorId: authorization.actorId });
-    const existing = (state.stewardshipApprovals ?? []).find(item => item.attestation === approval.attestation);
+    const existing = (state.stewardshipApprovals ?? []).find(item => item.proposalId === approval.proposalId && item.headSha === approval.headSha && item.actorId === approval.actorId && item.outcome === approval.outcome);
     if (existing) return existing;
     await this.store.save({ ...state, stewardshipApprovals: [...(state.stewardshipApprovals ?? []), approval], history: [...state.history, { type: "stewardship_exact_head_approved", proposalId: approval.proposalId, headSha: approval.headSha, actorId: approval.actorId, at: approval.reviewedAt }] }, state.version);
     return approval;
@@ -52,8 +52,16 @@ export class OmniSeed {
   async evaluateStewardship(declaration, proposal, checks, authorization) {
     authorize(authorization, ["stewardship.propose"]);
     const state = await this.store.load(declaration.metadata.id), profile = compileStewardshipProfile(activeDeclaration(declaration, state), state);
+    const existing = (state.stewardshipEvaluations ?? []).find(item => item.proposalId === proposal.id && item.headSha === proposal.headSha && item.actorId === authorization.actorId);
+    if (existing) return structuredClone(existing.decision);
     const approval = [...(state.stewardshipApprovals ?? [])].reverse().find(item => item.proposalId === proposal.id && item.headSha === proposal.headSha);
-    return evaluateStewardshipProposal(profile, proposal, { actorId: authorization.actorId, approval, checks });
+    const decision = evaluateStewardshipProposal(profile, proposal, { actorId: authorization.actorId, approval, checks });
+    if (!decision.allowed) return decision;
+    const at = new Date().toISOString(), actionCount = proposal.actionCount ?? 1, repairRoundCount = proposal.repairRoundCount ?? 0;
+    const usage = { ...profile.usage, active: profile.usage.active + 1, dailyChanges: profile.usage.dailyChanges + 1, actions: profile.usage.actions + actionCount, repairRounds: profile.usage.repairRounds + repairRoundCount };
+    const evaluation = { proposalId: proposal.id, headSha: proposal.headSha, actorId: authorization.actorId, actionCount, repairRoundCount, at, decision };
+    await this.store.save({ ...state, stewardshipUsage: usage, stewardshipEvaluations: [...(state.stewardshipEvaluations ?? []), evaluation], history: [...state.history, { type: "stewardship_proposal_allowed", proposalId: proposal.id, headSha: proposal.headSha, actorId: authorization.actorId, actionCount, repairRoundCount, at }] }, state.version);
+    return decision;
   }
   async getCompanySnapshot(declaration, authorization, current = null) {
     authorize(authorization, ["company.read"]);
