@@ -124,14 +124,31 @@ test("stale, mismatched, unverified and unsuccessful exact-head evidence is reje
 });
 
 test("approval, evaluation and completion retries are idempotent with exact-once release", async () => {
-  const f = fixture(), engine = new OmniSeed({ store: f.store, providers: new ProviderRegistry() }), input = { proposalId: f.proposal.id, observationId: f.observation.id, outcome: "approved" };
+  const f = fixture(), engine = new OmniSeed({ store: f.store, providers: new ProviderRegistry(), companyRepository: mergeRepository() }), input = { proposalId: f.proposal.id, observationId: f.observation.id, outcome: "approved" };
   const approval = await invoke(engine, f.company, "record_stewardship_review", "stewardship.review", input, reviewer); assert.deepEqual(await invoke(engine, f.company, "record_stewardship_review", "stewardship.review", input, reviewer), approval);
   assert.equal((await invoke(engine, f.company, "evaluate_stewardship_proposal", "stewardship.propose", input, steward)).allowed, true); assert.equal((await invoke(engine, f.company, "evaluate_stewardship_proposal", "stewardship.propose", input, steward)).allowed, true);
-  const completion = await invoke(engine, f.company, "complete_stewardship_proposal", "stewardship.propose", { proposalId: f.proposal.id, observationId: f.observation.id, outcome: "completed", evidence: [{ type: "provider_observation", id: f.observation.id }] }, steward);
+  await engine.mergeCompanyChange(f.company, f.proposal.id, { actorId: "executor", permissions: ["company_change.merge"] });
+  const merged = await f.store.load("acme"), mergeEvidence = merged.evidence.find(item => item.type === "company_change_merged" && item.source === "engine");
+  const completion = await invoke(engine, f.company, "complete_stewardship_proposal", "stewardship.propose", { proposalId: f.proposal.id, observationId: f.observation.id, outcome: "completed", evidence: [{ type: "engine_evidence", id: mergeEvidence.id }] }, steward);
   assert.deepEqual(await invoke(engine, f.company, "complete_stewardship_proposal", "stewardship.propose", { proposalId: f.proposal.id, observationId: f.observation.id, outcome: "failed" }, steward), completion);
   const state = await f.store.load("acme");
   assert.deepEqual(state.stewardshipUsage, { active: 0, dailyChanges: 1, actions: 1, repairRounds: 0, day: new Date().toISOString().slice(0, 10) });
   assert.equal(state.stewardshipApprovals.length, 1); assert.equal(state.stewardshipEvaluations.length, 1);
+});
+
+test("completed stewardship requires a persisted merge and Engine-recorded merge evidence", async () => {
+  const f = fixture(), engine = new OmniSeed({ store: f.store, providers: new ProviderRegistry(), companyRepository: mergeRepository() });
+  await engine.recordStewardshipApproval(f.company, { proposalId: f.proposal.id, observationId: f.observation.id, outcome: "approved" }, reviewer);
+  await engine.evaluateStewardship(f.company, { proposalId: f.proposal.id, observationId: f.observation.id }, steward);
+  const completion = { proposalId: f.proposal.id, observationId: f.observation.id, outcome: "completed", evidence: [{ type: "provider_observation", id: f.observation.id }] };
+  await assert.rejects(engine.completeStewardship(f.company, completion, steward), error => error.code === "stewardship_completion_not_merged");
+  assert.equal((await f.store.load("acme")).stewardshipEvaluations[0].lease.status, "active");
+
+  await engine.mergeCompanyChange(f.company, f.proposal.id, { actorId: "executor", permissions: ["company_change.merge"] });
+  await assert.rejects(engine.completeStewardship(f.company, completion, steward), error => error.code === "stewardship_completion_evidence_unverified");
+  const state = await f.store.load("acme"), evidence = state.evidence.find(item => item.type === "company_change_merged" && item.source === "engine");
+  assert.deepEqual({ companyId: evidence.companyId, proposalId: evidence.proposalId, proposalDigest: evidence.proposalDigest, headSha: evidence.headSha, mergeCommitSha: evidence.mergeCommitSha }, { companyId: "acme", proposalId: f.proposal.id, proposalDigest: f.proposal.hash, headSha: head, mergeCommitSha: "d".repeat(40) });
+  assert.equal((await engine.completeStewardship(f.company, { ...completion, evidence: [{ type: "engine_evidence", id: evidence.id }] }, steward)).status, "completed");
 });
 
 test("completion operation rejects missing, fabricated, malformed, mismatched, stale, and unverified evidence without releasing its lease", async () => {
@@ -168,14 +185,16 @@ test("concurrent leases for one proposal and actor complete by exact observation
   const f = fixture({ policy: { ...autonomy, limits: { ...autonomy.limits, concurrency: 2, dailyChanges: 2 } } });
   const second = { ...f.observation, id: "obs_2" };
   const state = await f.store.load("acme"); state.stewardshipObservations.push(second);
-  const store = new MemoryStateStore(state), engine = new OmniSeed({ store, providers: new ProviderRegistry() });
+  const store = new MemoryStateStore(state), engine = new OmniSeed({ store, providers: new ProviderRegistry(), companyRepository: mergeRepository() });
   for (const observation of [f.observation, second]) {
     await engine.recordStewardshipApproval(f.company, { proposalId: f.proposal.id, observationId: observation.id, outcome: "approved" }, reviewer);
     assert.equal((await engine.evaluateStewardship(f.company, { proposalId: f.proposal.id, observationId: observation.id }, steward)).allowed, true);
   }
-  await engine.completeStewardship(f.company, { proposalId: f.proposal.id, observationId: second.id, outcome: "completed", evidence: [{ type: "provider_observation", id: second.id }] }, steward);
+  await engine.mergeCompanyChange(f.company, f.proposal.id, { actorId: "executor", permissions: ["company_change.merge"] });
+  const mergeEvidence = (await store.load("acme")).evidence.find(item => item.type === "company_change_merged" && item.source === "engine"), evidence = [{ type: "engine_evidence", id: mergeEvidence.id }];
+  await engine.completeStewardship(f.company, { proposalId: f.proposal.id, observationId: second.id, outcome: "completed", evidence }, steward);
   assert.deepEqual((await store.load("acme")).stewardshipEvaluations.map(item => item.lease.status), ["active", "completed"]);
-  await engine.completeStewardship(f.company, { proposalId: f.proposal.id, observationId: f.observation.id, outcome: "completed", evidence: [{ type: "provider_observation", id: f.observation.id }] }, steward);
+  await engine.completeStewardship(f.company, { proposalId: f.proposal.id, observationId: f.observation.id, outcome: "completed", evidence }, steward);
   const completed = await store.load("acme");
   assert.deepEqual(completed.stewardshipEvaluations.map(item => item.lease.status), ["completed", "completed"]);
   assert.equal(completed.stewardshipUsage.active, 0);

@@ -95,7 +95,9 @@ export class OmniSeed {
     if (index < 0) throw new EngineError("stewardship_lease_not_found", "No active stewardship lease exists for this proposal and actor.");
     const current = state.stewardshipEvaluations[index];
     if (current.lease?.status !== "active") return structuredClone(current.lease);
-    const evidence = resolveStewardshipCompletionEvidence(state, input.evidence, current);
+    const proposal = requireProposal(state, input.proposalId);
+    if (input.outcome === "completed" && proposal.status !== "merged") throw new EngineError("stewardship_completion_not_merged", "Stewardship cannot be completed until the exact company change has been merged.");
+    const evidence = resolveStewardshipCompletionEvidence(state, input.evidence, current, input.outcome === "completed" ? proposal : null);
     const at = new Date().toISOString(), evaluations = structuredClone(state.stewardshipEvaluations);
     evaluations[index].lease = { ...current.lease, status: input.outcome, releasedAt: at, evidence };
     const usage = { ...(state.stewardshipUsage ?? {}), active: Math.max(0, (state.stewardshipUsage?.active ?? 0) - 1) };
@@ -323,7 +325,8 @@ export class OmniSeed {
     const merge = await this.companyRepository.mergeSubmission({ submission: proposal.submission, proposal, authorization, stewardshipDecision: stewardshipEvaluation?.decision ?? null });
     if (!merge?.merged || !merge.mergeCommitSha) throw new EngineError("company_repository_merge_failed", "Company repository Provider did not return merge evidence");
     const mergedProposal = { ...proposal, status: "merged", merge };
-    const next = await this.store.save({ ...state, companyChanges: replaceProposal(state, mergedProposal), evidence: [...state.evidence, ...(merge.evidence ?? [])], history: [...state.history, { type: "company_change_merged", proposalId, actorId: authorization.actorId, pullRequest: proposal.submission.pullRequest, mergeCommitSha: merge.mergeCommitSha, at: merge.mergedAt }] }, state.version);
+    const recordedAt = new Date().toISOString(), mergeEvidence = createCompanyChangeMergeEvidence(state, proposal, merge, recordedAt);
+    const next = await this.store.save({ ...state, companyChanges: replaceProposal(state, mergedProposal), evidence: [...state.evidence, mergeEvidence, ...(merge.evidence ?? [])], history: [...state.history, { type: "company_change_merged", proposalId, actorId: authorization.actorId, pullRequest: proposal.submission.pullRequest, mergeCommitSha: merge.mergeCommitSha, at: merge.mergedAt ?? recordedAt }] }, state.version);
     return { proposal: mergedProposal, state: next, merge };
   }
   async #markCompanyChangeStale(state, proposal, authorization, actualDefinitionHash) {
@@ -453,7 +456,7 @@ function verifiedStewardshipObservation(state, observationId, proposal) {
   return observation;
 }
 
-function resolveStewardshipCompletionEvidence(state, references, evaluation) {
+function resolveStewardshipCompletionEvidence(state, references, evaluation, mergedProposal = null) {
   if (!Array.isArray(references) || references.length === 0) throw new EngineError("stewardship_completion_evidence_invalid", "Completion requires at least one typed stable evidence identifier.");
   const normalized = [], seen = new Set();
   for (const reference of references) {
@@ -467,9 +470,18 @@ function resolveStewardshipCompletionEvidence(state, references, evaluation) {
       : uniquelyResolveEvidence(state.stewardshipObservations, reference.id);
     if (!record) throw new EngineError("stewardship_completion_evidence_missing", `Completion evidence does not resolve to one persisted Engine record: ${reference.id}`);
     verifyCompletionEvidenceBinding(state, record, evaluation, reference.type);
+    if (mergedProposal && (reference.type !== "engine_evidence" || record.type !== "company_change_merged" || record.mergeCommitSha !== mergedProposal.merge?.mergeCommitSha)) {
+      throw new EngineError("stewardship_completion_evidence_unverified", "Completed stewardship requires Engine-recorded evidence of the persisted company change merge.");
+    }
     seen.add(key); normalized.push({ type: reference.type, id: reference.id });
   }
   return normalized;
+}
+
+function createCompanyChangeMergeEvidence(state, proposal, merge, recordedAt) {
+  const headSha = proposal.submission?.commit ?? proposal.submission?.headSha;
+  const digest = createHash("sha256").update(JSON.stringify({ companyId: state.companyId, proposalId: proposal.id, proposalDigest: proposal.hash, headSha, mergeCommitSha: merge.mergeCommitSha })).digest("hex");
+  return { id: `company_change_merge_${digest.slice(0, 24)}`, type: "company_change_merged", source: "engine", companyId: state.companyId, proposalId: proposal.id, proposalDigest: proposal.hash, headSha: String(headSha).toLowerCase(), mergeCommitSha: merge.mergeCommitSha, mergedAt: merge.mergedAt ?? recordedAt, recordedAt };
 }
 
 function uniquelyResolveEvidence(records = [], id) {
