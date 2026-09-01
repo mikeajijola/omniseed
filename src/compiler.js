@@ -1,4 +1,5 @@
 import { assertOmniform, primitiveFamilies } from "@omniseed/omniform";
+import { compileStewardshipProfile } from "./stewardship.js";
 
 export function compileCompany(declaration, runtimeState = emptyRuntimeState(declaration?.metadata?.id), { providerRegistry, resolutions = [], operationRegistry, binding = {} } = {}) {
   assertOmniform(declaration);
@@ -41,11 +42,11 @@ export function compileCompany(declaration, runtimeState = emptyRuntimeState(dec
   const operations = declaration.spec.operations.map(operation => operationRegistry.describe(operation, { providers }));
   const authority = declaration.spec.governance?.desiredState ?? null;
   const instance = { companyId: declaration.metadata.id, companyName: declaration.metadata.name, desiredState: authority, desiredRevision: binding.desiredRevision ?? null, observedRevision: binding.observedRevision ?? null, omniformVersion: declaration.apiVersion, observedStateRevision: runtimeState.version, environment: binding.environment ?? "unspecified", deployment: binding.deployment ?? null };
-  const stewardship = declaration.spec.stewardship ? { ...declaration.spec.stewardship, capability: capabilities.find(item => item.id === declaration.spec.stewardship.capability) ?? null, realisation: realisationById.get(declaration.spec.stewardship.realisation) ?? null } : null;
+  const stewardship = declaration.spec.stewardship ? { ...declaration.spec.stewardship, autonomy: compileStewardshipProfile(declaration, runtimeState), capability: capabilities.find(item => item.id === declaration.spec.stewardship.capability) ?? null, realisation: realisationById.get(declaration.spec.stewardship.realisation) ?? null } : null;
   return { apiVersion: "omniseed.dev/registry/v1alpha1", company: declaration.metadata, instance, stewardship, generatedAt: new Date().toISOString(), providers, providerGaps: providers.filter(item => item.state !== "healthy").map(item => ({ type: "provider_unavailable", primitiveFamily: item.family, desiredProvider: item.providerId, state: item.state, message: item.state === "unavailable" ? "No installed provider implementation is available." : `Provider is ${item.state}.` })), capabilities, realisations, resources, operations, observations: runtimeState.observed ?? [], evidence: runtimeState.evidence ?? [], plans: runtimeState.plans ?? [], proposals: runtimeState.companyChanges ?? [], history: runtimeState.history ?? [] };
 }
 
-export function emptyRuntimeState(companyId = null) { return { version: 0, companyId, binding: { desiredRevision: null, observedRevision: null }, deployed: [], observed: [], evidence: [], history: [], plans: [], companyChanges: [] }; }
+export function emptyRuntimeState(companyId = null) { return { version: 0, companyId, binding: { desiredRevision: null, observedRevision: null }, deployed: [], observed: [], evidence: [], history: [], plans: [], companyChanges: [], stewardshipControl: { state: "disabled", enabledAt: null, expiresAt: null, pausedAt: null }, stewardshipUsage: { active: 0, dailyChanges: 0, actions: 0, repairRounds: 0, day: null }, stewardshipApprovals: [] }; }
 export function flattenResources(grouped = {}) { return Object.entries(grouped ?? {}).flatMap(([family, resources]) => resources.map(resource => ({ family, ...resource }))); }
 export function providerIdForResource(declaration, resource) { return resource.provider ?? declaration.spec.providers[resource.family]?.provider ?? null; }
 export const resourceKey = (family, id) => `${family}:${id}`;

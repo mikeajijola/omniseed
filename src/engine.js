@@ -7,6 +7,7 @@ import { isDeepStrictEqual } from "node:util";
 import { associateCompanyWork, attachCompanyWorkSession, COMPANY_WORK_TERMINAL_STATES, createCompanyWorkRun, markCompanyWorkMutating, projectCompanyWorkRun, recordCompanyWorkEvent, transitionCompanyWorkRun } from "./company-work.js";
 import { MemoryCompanyWorkStore } from "./company-work-store.js";
 import { compareCompanySnapshot, createCompanySnapshot } from "./company-snapshot.js";
+import { attestStewardshipApproval, compileStewardshipProfile, evaluateStewardshipProposal } from "./stewardship.js";
 
 export class OmniSeed {
   constructor({ store, workStore = new MemoryCompanyWorkStore(), providers, resolver = new CapabilityResolver(), operations = defaultOperations(), companyRepository = null, binding = {} }) { this.store = store; this.workStore = workStore; this.providers = providers; this.resolver = resolver; this.operations = operations; this.companyRepository = companyRepository; this.binding = binding; }
@@ -16,6 +17,43 @@ export class OmniSeed {
     const resolutions = this.resolver.resolveCompany({ declaration: active, currentState: state, providerRegistry: this.providers });
     const persistedBinding = Object.fromEntries(Object.entries(state.binding ?? {}).filter(([, value]) => value != null));
     return { ...compileCompany(active, state, { providerRegistry: this.providers, resolutions, operationRegistry: this.operations, binding: { ...this.binding, ...persistedBinding } }), workRuns: workState.runs.map(projectCompanyWorkRun), definitionHash: definitionHash(active) };
+  }
+  async inspectStewardship(declaration, authorization) {
+    authorize(authorization, ["stewardship.read"]);
+    const state = await this.store.load(declaration.metadata.id);
+    return compileStewardshipProfile(activeDeclaration(declaration, state), state);
+  }
+  async enableStewardship(declaration, { expiresAt }, authorization) {
+    authorize(authorization, ["stewardship.control"]);
+    const state = await this.store.load(declaration.metadata.id), declared = declaration.spec.stewardship?.autonomy, now = new Date();
+    if (!declared) throw new EngineError("stewardship_not_declared", "No autonomous stewardship profile is declared.");
+    const expiry = Date.parse(expiresAt ?? "");
+    if (!Number.isFinite(expiry) || expiry <= now.getTime() || (declared.expiresAt && expiry > Date.parse(declared.expiresAt))) throw new EngineError("stewardship_expiry_invalid", "Enablement requires a future expiry no later than the declared expiry.");
+    const control = { state: "enabled", enabledAt: now.toISOString(), expiresAt: new Date(expiry).toISOString(), pausedAt: null };
+    await this.store.save({ ...state, stewardshipControl: control, history: [...state.history, { type: "stewardship_enabled", actorId: authorization.actorId, expiresAt: control.expiresAt, at: control.enabledAt }] }, state.version);
+    return compileStewardshipProfile(declaration, { ...state, stewardshipControl: control }, now);
+  }
+  async setStewardshipState(declaration, stateName, authorization) {
+    authorize(authorization, ["stewardship.control"]);
+    if (!["paused", "disabled"].includes(stateName)) throw new EngineError("stewardship_state_invalid", "Stewardship may only be paused or disabled through this operation.");
+    const state = await this.store.load(declaration.metadata.id), at = new Date().toISOString();
+    const control = { ...(state.stewardshipControl ?? {}), state: stateName, pausedAt: stateName === "paused" ? at : null };
+    await this.store.save({ ...state, stewardshipControl: control, history: [...state.history, { type: `stewardship_${stateName}`, actorId: authorization.actorId, at }] }, state.version);
+    return compileStewardshipProfile(declaration, { ...state, stewardshipControl: control });
+  }
+  async recordStewardshipApproval(declaration, input, authorization) {
+    authorize(authorization, ["stewardship.review"]);
+    const state = await this.store.load(declaration.metadata.id), approval = attestStewardshipApproval({ ...input, actorId: authorization.actorId });
+    const existing = (state.stewardshipApprovals ?? []).find(item => item.attestation === approval.attestation);
+    if (existing) return existing;
+    await this.store.save({ ...state, stewardshipApprovals: [...(state.stewardshipApprovals ?? []), approval], history: [...state.history, { type: "stewardship_exact_head_approved", proposalId: approval.proposalId, headSha: approval.headSha, actorId: approval.actorId, at: approval.reviewedAt }] }, state.version);
+    return approval;
+  }
+  async evaluateStewardship(declaration, proposal, checks, authorization) {
+    authorize(authorization, ["stewardship.propose"]);
+    const state = await this.store.load(declaration.metadata.id), profile = compileStewardshipProfile(declaration, state);
+    const approval = [...(state.stewardshipApprovals ?? [])].reverse().find(item => item.proposalId === proposal.id && item.headSha === proposal.headSha);
+    return evaluateStewardshipProposal(profile, proposal, { actorId: authorization.actorId, approval, checks });
   }
   async getCompanySnapshot(declaration, authorization, current = null) {
     authorize(authorization, ["company.read"]);
@@ -300,6 +338,12 @@ function defaultOperations() {
     .register("get_company_work", async (input, context) => context.engine.getCompanyWork(context.declaration, input.workRunId, context.authorization))
     .register("continue_company_work", async (input, context) => context.engine.continueCompanyWork(context.declaration, input.workRunId, input, context.authorization))
     .register("cancel_company_work", async (input, context) => context.engine.cancelCompanyWork(context.declaration, input.workRunId, context.authorization))
+    .register("inspect_stewardship", async (_input, context) => context.engine.inspectStewardship(context.declaration, context.authorization))
+    .register("enable_stewardship", async (input, context) => context.engine.enableStewardship(context.declaration, input, context.authorization))
+    .register("pause_stewardship", async (_input, context) => context.engine.setStewardshipState(context.declaration, "paused", context.authorization))
+    .register("disable_stewardship", async (_input, context) => context.engine.setStewardshipState(context.declaration, "disabled", context.authorization))
+    .register("evaluate_stewardship_proposal", async (input, context) => context.engine.evaluateStewardship(context.declaration, input.proposal, input.checks, context.authorization))
+    .register("record_stewardship_review", async (input, context) => context.engine.recordStewardshipApproval(context.declaration, input, context.authorization))
     .register("bind_company", async (input, context) => context.engine.recordCompanyBinding(context.declaration, input, context.authorization))
     .register("observe_company", async (_input, context) => context.engine.reconcile(context.declaration, context.authorization))
     .register("generate_plan", async (_input, context) => context.engine.plan(context.declaration, context.authorization))

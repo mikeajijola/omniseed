@@ -43,6 +43,10 @@ Calls carry the canonical company ID as their namespace and return Provider-neut
 
 Historical deployed resources and evidence may retain the family recorded when they were created, including removed alpha vocabulary. OmniSeed keeps those records auditable. New desired declarations and new Provider advertisements use only the canonical Omniform families; no runtime code silently remaps `systems` or `company_search`.
 
+## Autonomous stewardship policy
+
+The Engine compiles `spec.stewardship.autonomy` into an inspectable effective profile and persists its operator-controlled enabled, paused, disabled, or expired state separately from desired state. Server-bound `stewardship.control`, `stewardship.review`, and `stewardship.propose` permissions protect control, independent exact-head approval, and evaluation. Decisions return stable reason codes; independent approval is bound to proposal ID and head SHA, and evaluation rechecks expiry, limits, protected categories, separation of duties, and non-empty successful checks. Provider executors receive an allowed exact-head decision but do not decide company policy.
+
 ## Durable company work
 
 An Agent conversation and company work are not the same thing. A semantic runtime such as Eve owns its durable model session, tool loop, continuation token, and raw event stream. OmniSeed owns the company-scoped operational projection: intent, actor, lifecycle state, ordinary operations invoked, governance pauses, proposal/plan references, Provider actions, observations, evidence, and outcome.
