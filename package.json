@@ -23,7 +23,7 @@
     "check": "npm test"
   },
   "dependencies": {
-    "@omniseed/omniform": "1.0.0-alpha.6",
+    "@omniseed/omniform": "git+https://github.com/mikeajijola/omniform.git#fa1fa6073679a0ea4230c11913f05f1ed3c917af",
     "yaml": "^2.8.1"
   },
   "engines": {

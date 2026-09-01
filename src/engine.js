@@ -76,8 +76,9 @@ export class OmniSeed {
     if (index < 0) throw new EngineError("stewardship_lease_not_found", "No active stewardship lease exists for this proposal and actor.");
     const current = state.stewardshipEvaluations[index];
     if (current.lease?.status !== "active") return structuredClone(current.lease);
+    const evidence = resolveStewardshipCompletionEvidence(state, input.evidence, current);
     const at = new Date().toISOString(), evaluations = structuredClone(state.stewardshipEvaluations);
-    evaluations[index].lease = { ...current.lease, status: input.outcome, releasedAt: at, evidence: [...new Set(input.evidence ?? [])] };
+    evaluations[index].lease = { ...current.lease, status: input.outcome, releasedAt: at, evidence };
     const usage = { ...(state.stewardshipUsage ?? {}), active: Math.max(0, (state.stewardshipUsage?.active ?? 0) - 1) };
     await this.store.save({ ...state, stewardshipUsage: usage, stewardshipEvaluations: evaluations, history: [...state.history, { type: `stewardship_${input.outcome}`, proposalId: input.proposalId, actorId: authorization.actorId, evidence: evaluations[index].lease.evidence, at }] }, state.version);
     return structuredClone(evaluations[index].lease);
@@ -430,6 +431,40 @@ function verifiedStewardshipObservation(state, observationId, proposal) {
   if (!Number.isFinite(observed) || Date.now() - observed > maxAgeMs || observed > Date.now() + 60_000) throw new EngineError("stewardship_evidence_stale", "Exact-head repository/check observation is stale.");
   if (!Array.isArray(observation.checks) || !observation.checks.length || observation.checks.some(check => typeof check?.status !== "string")) throw new EngineError("stewardship_evidence_unverified", "Verified observation must contain repository check results.");
   return observation;
+}
+
+function resolveStewardshipCompletionEvidence(state, references, evaluation) {
+  if (!Array.isArray(references) || references.length === 0) throw new EngineError("stewardship_completion_evidence_invalid", "Completion requires at least one typed stable evidence identifier.");
+  const normalized = [], seen = new Set();
+  for (const reference of references) {
+    if (!reference || typeof reference !== "object" || Array.isArray(reference) || !["engine_evidence", "provider_observation"].includes(reference.type) || typeof reference.id !== "string" || !/^[A-Za-z][A-Za-z0-9._:-]{2,255}$/.test(reference.id) || Object.keys(reference).some(key => !["type", "id"].includes(key))) {
+      throw new EngineError("stewardship_completion_evidence_invalid", "Completion evidence must use only { type, id } stable identifiers.");
+    }
+    const key = `${reference.type}:${reference.id}`;
+    if (seen.has(key)) continue;
+    const record = reference.type === "engine_evidence"
+      ? uniquelyResolveEvidence(state.evidence, reference.id)
+      : uniquelyResolveEvidence(state.stewardshipObservations, reference.id);
+    if (!record) throw new EngineError("stewardship_completion_evidence_missing", `Completion evidence does not resolve to one persisted Engine record: ${reference.id}`);
+    verifyCompletionEvidenceBinding(state, record, evaluation, reference.type);
+    seen.add(key); normalized.push({ type: reference.type, id: reference.id });
+  }
+  return normalized;
+}
+
+function uniquelyResolveEvidence(records = [], id) {
+  const matches = records.filter(item => item?.id === id);
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function verifyCompletionEvidenceBinding(state, record, evaluation, referenceType) {
+  if (record.companyId != null && record.companyId !== state.companyId) throw new EngineError("stewardship_completion_evidence_mismatch", "Completion evidence belongs to another company.");
+  if (record.proposalId !== evaluation.proposalId || record.proposalDigest !== evaluation.proposalDigest) throw new EngineError("stewardship_completion_evidence_mismatch", "Completion evidence is not bound to this persisted proposal.");
+  const recordHead = record.headSha ?? record.submissionHeadSha;
+  if (typeof recordHead !== "string" || recordHead.toLowerCase() !== evaluation.headSha.toLowerCase()) throw new EngineError("stewardship_completion_evidence_mismatch", "Completion evidence is not bound to the exact evaluated head.");
+  const observedAt = Date.parse(record.observedAt ?? record.recordedAt ?? record.mergedAt ?? "");
+  if (!Number.isFinite(observedAt) || observedAt > Date.now() + 60_000 || Date.now() - observedAt > 15 * 60 * 1000) throw new EngineError("stewardship_completion_evidence_stale", "Completion evidence is malformed or stale.");
+  if (referenceType === "provider_observation" && (record.verified !== true || !["provider", "engine"].includes(record.source))) throw new EngineError("stewardship_completion_evidence_unverified", "Provider observation completion evidence is not verified.");
 }
 
 function requireStewardshipAuthority(declaration, state, proposal, now = new Date()) {
