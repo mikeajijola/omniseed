@@ -4,6 +4,7 @@ import { authorize, EngineError, OperationRegistry } from "./operations.js";
 import { CapabilityResolver } from "./resolver.js";
 import { applyDefinitionPatch, createCompanyChangeProposal, previewCompanyChange, verifyCompanyChangeProposal } from "./company-change.js";
 import { isDeepStrictEqual } from "node:util";
+import { createHash } from "node:crypto";
 import { associateCompanyWork, attachCompanyWorkSession, COMPANY_WORK_TERMINAL_STATES, createCompanyWorkRun, markCompanyWorkMutating, projectCompanyWorkRun, recordCompanyWorkEvent, transitionCompanyWorkRun } from "./company-work.js";
 import { MemoryCompanyWorkStore } from "./company-work-store.js";
 import { compareCompanySnapshot, createCompanySnapshot } from "./company-snapshot.js";
@@ -50,6 +51,24 @@ export class OmniSeed {
     if (existing) return existing;
     await this.store.save({ ...state, stewardshipApprovals: [...(state.stewardshipApprovals ?? []), approval], history: [...state.history, { type: "stewardship_exact_head_approved", proposalId: approval.proposalId, headSha: approval.headSha, actorId: approval.actorId, at: approval.reviewedAt }] }, state.version);
     return approval;
+  }
+  async observeStewardshipProposal(declaration, input, authorization) {
+    authorize(authorization, ["stewardship.observe"]);
+    const state = await this.store.load(declaration.metadata.id), active = activeDeclaration(declaration, state);
+    const proposal = verifiedStewardshipProposal(state, input.proposalId, active);
+    if (!proposal.submission || !this.companyRepository) throw new EngineError("company_repository_unavailable", "A submitted change and connected company repository are required for stewardship observation.");
+    const inspected = await this.companyRepository.inspectSubmission({ submission: proposal.submission, proposal, authorization });
+    const expectedHead = proposal.submission.commit ?? proposal.submission.headSha ?? null;
+    if (!/^[0-9a-f]{40,64}$/i.test(inspected?.headSha ?? "") || String(inspected.headSha).toLowerCase() !== String(expectedHead).toLowerCase()) throw new EngineError("stewardship_changed_head", "Provider-observed head does not match the persisted repository submission head.");
+    if (!Array.isArray(inspected.checks) || !inspected.checks.length || inspected.checks.some(check => typeof check?.status !== "string")) throw new EngineError("stewardship_evidence_unverified", "The repository Provider did not return check results for the exact submission head.");
+    const observedAt = inspected.observedAt ?? new Date().toISOString();
+    if (!Number.isFinite(Date.parse(observedAt))) throw new EngineError("stewardship_evidence_unverified", "The repository Provider returned an invalid observation time.");
+    const digest = createHash("sha256").update(JSON.stringify({ companyId: state.companyId, proposalId: proposal.id, proposalDigest: proposal.hash, headSha: inspected.headSha.toLowerCase(), observedAt, checks: inspected.checks })).digest("hex");
+    const observation = { id: `stewardship_observation_${digest.slice(0, 24)}`, companyId: state.companyId, source: "provider", provider: inspected.observation?.provider ?? this.companyRepository.provider?.metadata?.id ?? null, verified: true, proposalId: proposal.id, proposalDigest: proposal.hash, headSha: inspected.headSha.toLowerCase(), observedAt, checks: structuredClone(inspected.checks), repairRoundCount: 0 };
+    const existing = (state.stewardshipObservations ?? []).find(item => item.id === observation.id);
+    if (existing) return structuredClone(existing);
+    await this.store.save({ ...state, stewardshipObservations: [...(state.stewardshipObservations ?? []), observation], history: [...state.history, { type: "stewardship_proposal_observed", proposalId: proposal.id, observationId: observation.id, headSha: observation.headSha, actorId: authorization.actorId, at: observedAt }] }, state.version);
+    return observation;
   }
   async evaluateStewardship(declaration, input, authorization) {
     authorize(authorization, ["stewardship.propose"]);
@@ -372,6 +391,7 @@ function defaultOperations() {
     .register("enable_stewardship", async (input, context) => context.engine.enableStewardship(context.declaration, input, context.authorization))
     .register("pause_stewardship", async (_input, context) => context.engine.setStewardshipState(context.declaration, "paused", context.authorization))
     .register("disable_stewardship", async (_input, context) => context.engine.setStewardshipState(context.declaration, "disabled", context.authorization))
+    .register("observe_stewardship_proposal", async (input, context) => context.engine.observeStewardshipProposal(context.declaration, input, context.authorization))
     .register("evaluate_stewardship_proposal", async (input, context) => context.engine.evaluateStewardship(context.declaration, input, context.authorization))
     .register("record_stewardship_review", async (input, context) => context.engine.recordStewardshipApproval(context.declaration, input, context.authorization))
     .register("complete_stewardship_proposal", async (input, context) => context.engine.completeStewardship(context.declaration, input, context.authorization))

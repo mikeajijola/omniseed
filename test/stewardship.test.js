@@ -72,6 +72,35 @@ test("merged Omniform stewardship schema validates through inspect and governed 
 
 test("attestations require persisted digest and observation bindings", () => assert.throws(() => attestStewardshipApproval({ proposalId: "p", headSha: head, actorId: "r", outcome: "approved" }), error => error.code === "stewardship_approval_invalid"));
 
+test("Provider repository inspection persists exact-head evidence for review, evaluation, and merge", async () => {
+  const f = fixture(), state = await f.store.load("acme");
+  state.stewardshipObservations = [];
+  const repository = {
+    async inspectSubmission({ submission }) {
+      assert.equal(submission.commit, head);
+      return { headSha: head, checks: [{ name: "test", status: "successful" }], observedAt: new Date().toISOString(), observation: { provider: "github_protocol" } };
+    },
+    ...mergeRepository()
+  };
+  const store = new MemoryStateStore(state), engine = new OmniSeed({ store, providers: new ProviderRegistry(), companyRepository: repository });
+  const observer = { actorId: "observer", permissions: ["stewardship.observe"] };
+  const observation = await invoke(engine, f.company, "observe_stewardship_proposal", "stewardship.observe", { proposalId: f.proposal.id }, observer);
+  assert.equal(observation.verified, true);
+  assert.equal(observation.provider, "github_protocol");
+  assert.equal((await store.load("acme")).stewardshipObservations[0].id, observation.id);
+  await engine.recordStewardshipApproval(f.company, { proposalId: f.proposal.id, observationId: observation.id, outcome: "approved" }, reviewer);
+  assert.equal((await engine.evaluateStewardship(f.company, { proposalId: f.proposal.id, observationId: observation.id }, steward)).allowed, true);
+  assert.equal((await engine.mergeCompanyChange(f.company, f.proposal.id, { actorId: "executor", permissions: ["company_change.merge"] })).proposal.status, "merged");
+});
+
+test("stewardship observation fails closed when Provider checks or exact head are missing", async () => {
+  for (const inspected of [{ headSha: null, checks: [{ status: "successful" }] }, { headSha: head, checks: null }]) {
+    const f = fixture(), state = await f.store.load("acme"); state.stewardshipObservations = [];
+    const engine = new OmniSeed({ store: new MemoryStateStore(state), providers: new ProviderRegistry(), companyRepository: { async inspectSubmission() { return inspected; } } });
+    await assert.rejects(engine.observeStewardshipProposal(f.company, { proposalId: f.proposal.id }, { actorId: "observer", permissions: ["stewardship.observe"] }), error => ["stewardship_changed_head", "stewardship_evidence_unverified"].includes(error.code));
+  }
+});
+
 test("caller-authored categories/checks cannot bypass facts derived from persisted patch", async () => {
   const f = fixture({ patch: [{ op: "replace", path: "/spec/stewardship/autonomy/gates/validation", value: true }] }), engine = new OmniSeed({ store: f.store, providers: new ProviderRegistry() });
   await engine.recordStewardshipApproval(f.company, { proposalId: f.proposal.id, observationId: f.observation.id, outcome: "approved", headSha: "b".repeat(40) }, reviewer);

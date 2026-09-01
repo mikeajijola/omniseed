@@ -90,7 +90,9 @@ export class ProviderGitCompanyRepository extends CompanyRepository {
       merged: Boolean(pullRequest?.merged),
       mergeRevision: pullRequest?.mergeCommitSha ?? null,
       currentDesiredRevision: observation.snapshot?.baseSha ?? null,
+      headSha: pullRequest?.headSha ?? observation.snapshot?.headSha ?? null,
       checks: observation.snapshot?.checks ?? null,
+      observedAt: observation.checkedAt ?? observation.observedAt ?? null,
       observation
     };
   }

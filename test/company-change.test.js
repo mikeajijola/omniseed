@@ -199,7 +199,7 @@ test("Provider-backed company repository submits the exact candidate through a w
     },
     async observe(resource) {
       calls.push({ method: "observe", resource });
-      return { status: "healthy", checkedAt: "2026-08-15T00:00:00Z", evidence: [{ type: "software_change_state", source: "github_protocol" }], snapshot: { pullRequest: { state: "open", merged: false } } };
+      return { status: "healthy", checkedAt: "2026-08-15T00:00:00Z", evidence: [{ type: "software_change_state", source: "github_protocol" }], snapshot: { pullRequest: { state: "open", merged: false, headSha: "b".repeat(40) }, checks: [{ name: "test", status: "successful" }] } };
     }
   };
   const repository = new ProviderGitCompanyRepository({ provider });
@@ -219,6 +219,9 @@ test("Provider-backed company repository submits the exact candidate through a w
   assert.equal(observed.status, "open");
   assert.equal(observed.merged, false);
   assert.equal(observed.currentDesiredRevision, null);
+  assert.equal(observed.headSha, "b".repeat(40));
+  assert.deepEqual(observed.checks, [{ name: "test", status: "successful" }]);
+  assert.equal(observed.observedAt, "2026-08-15T00:00:00Z");
 });
 
 test("Provider-backed company repository rejects a Provider outside workflows", () => {
