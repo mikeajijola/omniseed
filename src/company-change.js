@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { assertOmniform, canonicalize } from "@omniseed/omniform";
 import { definitionHash } from "./planner.js";
 import { EngineError } from "./operations.js";
+import { assertStewardshipPolicySafe } from "./stewardship.js";
 
 const supportedOperations = new Set(["add", "remove", "replace"]);
 const forbiddenSegments = new Set(["__proto__", "prototype", "constructor"]);
@@ -114,8 +115,10 @@ function decodePointer(segment) {
 }
 
 function validateCandidate(candidate) {
-  try { assertOmniform(candidate); return { valid: true, issues: [] }; }
+  assertStewardshipPolicySafe(candidate);
+  try { assertOmniform(candidate); }
   catch (error) { throw new EngineError("company_change_invalid", "Proposed mutation does not produce valid Omniform", { validation: error.issues ?? [{ message: error.message }] }); }
+  return { valid: true, issues: [] };
 }
 
 function normalizeEvidenceReferences(references = [], evidence = []) {
