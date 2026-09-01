@@ -280,6 +280,7 @@ export class OmniSeed {
     if (proposal.status !== "approved") throw new EngineError("company_change_invalid_state", `Only approved changes can be applied; found ${proposal.status}`);
     if (!verifyCompanyChangeProposal(proposal) || proposal.approval?.proposalHash !== proposal.hash || proposal.requiredAuthority.approve.some(permission => !(proposal.approval?.permissions ?? []).includes(permission))) throw new EngineError("approval_invalid", "Stored approval does not bind the exact persisted proposal and its required approval authority");
     if (definitionHash(active) !== proposal.baseDefinitionHash) return this.#markCompanyChangeStale(state, proposal, authorization, definitionHash(active));
+    if (!active.spec.governance?.desiredState) requireStewardshipAuthority(active, state, proposal);
     const candidate = applyDefinitionPatch(active, proposal.patch), resultingDefinitionHash = definitionHash(candidate);
     if (resultingDefinitionHash !== proposal.proposedDefinitionHash) throw new EngineError("company_change_tampered", "Applied result differs from the reviewed candidate definition");
     if (active.spec.governance?.desiredState) {
@@ -295,10 +296,11 @@ export class OmniSeed {
   }
   async mergeCompanyChange(declaration, proposalId, authorization) {
     authorize(authorization, ["company_change.merge"]);
-    const state = await this.store.load(declaration.metadata.id), proposal = requireProposal(state, proposalId);
+    const state = await this.store.load(declaration.metadata.id), active = activeDeclaration(declaration, state), proposal = requireProposal(state, proposalId);
     if (proposal.status !== "submitted") throw new EngineError("company_change_invalid_state", `Only submitted changes can be merged; found ${proposal.status}`);
+    const stewardshipEvaluation = requireStewardshipAuthority(active, state, proposal);
     if (!this.companyRepository) throw new EngineError("company_repository_unavailable", "Canonical Git company repository is not connected");
-    const merge = await this.companyRepository.mergeSubmission({ submission: proposal.submission, proposal, authorization });
+    const merge = await this.companyRepository.mergeSubmission({ submission: proposal.submission, proposal, authorization, stewardshipDecision: stewardshipEvaluation?.decision ?? null });
     if (!merge?.merged || !merge.mergeCommitSha) throw new EngineError("company_repository_merge_failed", "Company repository Provider did not return merge evidence");
     const mergedProposal = { ...proposal, status: "merged", merge };
     const next = await this.store.save({ ...state, companyChanges: replaceProposal(state, mergedProposal), evidence: [...state.evidence, ...(merge.evidence ?? [])], history: [...state.history, { type: "company_change_merged", proposalId, actorId: authorization.actorId, pullRequest: proposal.submission.pullRequest, mergeCommitSha: merge.mergeCommitSha, at: merge.mergedAt }] }, state.version);
@@ -428,6 +430,27 @@ function verifiedStewardshipObservation(state, observationId, proposal) {
   if (!Number.isFinite(observed) || Date.now() - observed > maxAgeMs || observed > Date.now() + 60_000) throw new EngineError("stewardship_evidence_stale", "Exact-head repository/check observation is stale.");
   if (!Array.isArray(observation.checks) || !observation.checks.length || observation.checks.some(check => typeof check?.status !== "string")) throw new EngineError("stewardship_evidence_unverified", "Verified observation must contain repository check results.");
   return observation;
+}
+
+function requireStewardshipAuthority(declaration, state, proposal, now = new Date()) {
+  const profile = compileStewardshipProfile(declaration, state, now);
+  if (!profile || !String(profile.declaredMode ?? "").startsWith("autonomous")) return null;
+  if (profile.state !== "enabled") throw new EngineError("stewardship_authority_required", `Autonomous company change is blocked because stewardship is ${profile.state}.`);
+  const expectedHead = proposal.submission?.commit ?? proposal.submission?.headSha ?? null;
+  if (!expectedHead) throw new EngineError("stewardship_authority_required", "Autonomous company change requires a repository submission and an allowed exact-head stewardship evaluation.");
+  const evaluation = [...(state.stewardshipEvaluations ?? [])].reverse().find(item =>
+    item.proposalId === proposal.id &&
+    item.proposalDigest === proposal.hash &&
+    String(item.headSha).toLowerCase() === String(expectedHead).toLowerCase() &&
+    item.decision?.allowed === true &&
+    item.decision?.exactHeadSha?.toLowerCase() === String(expectedHead).toLowerCase() &&
+    item.lease?.status === "active"
+  );
+  if (!evaluation) throw new EngineError("stewardship_authority_required", "No active allowed stewardship evaluation is bound to this exact proposal digest and submission head.");
+  if (!Number.isFinite(Date.parse(evaluation.lease.expiresAt ?? "")) || Date.parse(evaluation.lease.expiresAt) <= now.getTime()) throw new EngineError("stewardship_lease_expired", "The exact-head stewardship lease has expired; autonomous authority fails closed until explicit recovery.");
+  const observation = verifiedStewardshipObservation(state, evaluation.observationId, proposal);
+  if (String(observation.headSha).toLowerCase() !== String(expectedHead).toLowerCase()) throw new EngineError("stewardship_changed_head", "The allowed stewardship observation no longer binds the submitted head.");
+  return evaluation;
 }
 
 function deriveStewardshipFacts(proposal, observation) {

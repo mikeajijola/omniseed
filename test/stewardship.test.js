@@ -40,6 +40,10 @@ const reviewer = { actorId: "reviewer", permissions: ["stewardship.review"] };
 const steward = { actorId: "steward", permissions: ["stewardship.propose"] };
 const invoke = (engine, company, id, permission, input, authorization) => engine.operations.invoke({ id, permissions: [permission] }, input, { engine, declaration: company, authorization });
 
+function mergeRepository(onMerge = () => {}) {
+  return { async mergeSubmission(input) { onMerge(input); return { merged: true, mergeCommitSha: "d".repeat(40), mergedAt: new Date().toISOString(), evidence: [] }; } };
+}
+
 test("mandatory autonomous gates are rejected during candidate validation without bricking profile compilation", () => {
   for (const gate of ["validation", "independentReview", "unchangedHead", "successfulChecks"]) {
     const unsafe = declaration({ ...autonomy, gates: { ...autonomy.gates, [gate]: false } });
@@ -107,4 +111,36 @@ test("zero budgets fail closed without consumption", async () => {
     assert.equal((await engine.evaluateStewardship(f.company, { proposalId: f.proposal.id, observationId: f.observation.id }, steward)).allowed, false);
     assert.equal((await f.store.load("acme")).stewardshipEvaluations.length, 0);
   }
+});
+
+test("autonomous desired-state apply cannot bypass exact-head stewardship", async () => {
+  const f = fixture(), state = await f.store.load("acme");
+  const owner = { actorId: "owner", permissions: ["company_change.approve", "company_change.apply"] };
+  state.companyChanges[0] = { ...state.companyChanges[0], status: "approved", approval: { proposalId: f.proposal.id, proposalHash: f.proposal.hash, actorId: owner.actorId, permissions: owner.permissions, approvedAt: new Date().toISOString() } };
+  const store = new MemoryStateStore(state), engine = new OmniSeed({ store, providers: new ProviderRegistry() });
+  await assert.rejects(engine.applyCompanyChange(f.company, f.proposal.id, owner), error => error.code === "stewardship_authority_required");
+  assert.equal((await store.load("acme")).companyChanges[0].status, "approved");
+});
+
+test("merge requires and consumes only an active allowed exact-head evaluation", async () => {
+  let providerInput;
+  const f = fixture(), engine = new OmniSeed({ store: f.store, providers: new ProviderRegistry(), companyRepository: mergeRepository(input => { providerInput = input; }) });
+  const executor = { actorId: "executor", permissions: ["company_change.merge"] };
+  await assert.rejects(engine.mergeCompanyChange(f.company, f.proposal.id, executor), error => error.code === "stewardship_authority_required");
+  await engine.recordStewardshipApproval(f.company, { proposalId: f.proposal.id, observationId: f.observation.id, outcome: "approved" }, reviewer);
+  assert.equal((await engine.evaluateStewardship(f.company, { proposalId: f.proposal.id, observationId: f.observation.id }, steward)).allowed, true);
+  const result = await engine.mergeCompanyChange(f.company, f.proposal.id, executor);
+  assert.equal(result.proposal.status, "merged");
+  assert.equal(result.merge.mergeCommitSha, "d".repeat(40));
+  assert.deepEqual(providerInput.stewardshipDecision, { allowed: true, code: "stewardship_allowed", message: "Declared stewardship policy allows this exact proposal head.", exactHeadSha: head });
+});
+
+test("expired exact-head leases fail closed at merge time", async () => {
+  const f = fixture(), engine = new OmniSeed({ store: f.store, providers: new ProviderRegistry(), companyRepository: mergeRepository() });
+  await engine.recordStewardshipApproval(f.company, { proposalId: f.proposal.id, observationId: f.observation.id, outcome: "approved" }, reviewer);
+  await engine.evaluateStewardship(f.company, { proposalId: f.proposal.id, observationId: f.observation.id }, steward);
+  const state = await f.store.load("acme");
+  state.stewardshipEvaluations[0].lease.expiresAt = "2020-01-01T00:00:00Z";
+  const expired = new OmniSeed({ store: new MemoryStateStore(state), providers: new ProviderRegistry(), companyRepository: mergeRepository() });
+  await assert.rejects(expired.mergeCompanyChange(f.company, f.proposal.id, { actorId: "executor", permissions: ["company_change.merge"] }), error => error.code === "stewardship_lease_expired");
 });
