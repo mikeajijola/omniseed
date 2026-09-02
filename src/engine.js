@@ -5,7 +5,7 @@ import { CapabilityResolver } from "./resolver.js";
 import { applyDefinitionPatch, createCompanyChangeProposal, previewCompanyChange, verifyCompanyChangeProposal } from "./company-change.js";
 import { isDeepStrictEqual } from "node:util";
 import { createHash } from "node:crypto";
-import { associateCompanyWork, attachCompanyWorkSession, COMPANY_WORK_TERMINAL_STATES, createCompanyWorkRun, markCompanyWorkMutating, projectCompanyWorkRun, recordCompanyWorkEvent, transitionCompanyWorkRun } from "./company-work.js";
+import { associateCompanyWork, attachCompanyWorkSession, COMPANY_WORK_TERMINAL_STATES, continuationEventFor, createCompanyWorkRun, markCompanyWorkMutating, projectCompanyWorkRun, projectContinuationEvent, recordCompanyWorkEvent, runtimeCompanyWorkRun, transitionCompanyWorkRun } from "./company-work.js";
 import { MemoryCompanyWorkStore } from "./company-work-store.js";
 import { compareCompanySnapshot, createCompanySnapshot } from "./company-snapshot.js";
 import { attestStewardshipApproval, compileStewardshipProfile, evaluateStewardshipProposal } from "./stewardship.js";
@@ -59,7 +59,10 @@ export class OmniSeed {
     if (!proposal.submission || !this.companyRepository) throw new EngineError("company_repository_unavailable", "A submitted change and connected company repository are required for stewardship observation.");
     const inspected = await this.companyRepository.inspectSubmission({ submission: proposal.submission, proposal, authorization });
     const expectedHead = proposal.submission.commit ?? proposal.submission.headSha ?? null;
-    if (!/^[0-9a-f]{40,64}$/i.test(inspected?.headSha ?? "") || String(inspected.headSha).toLowerCase() !== String(expectedHead).toLowerCase()) throw new EngineError("stewardship_changed_head", "Provider-observed head does not match the persisted repository submission head.");
+    if (!/^[0-9a-f]{40,64}$/i.test(inspected?.headSha ?? "") || String(inspected.headSha).toLowerCase() !== String(expectedHead).toLowerCase()) {
+      await this.#emitCompanyWorkFactSafely(declaration.metadata.id, { type: "checks", proposalId: proposal.id, proposalHash: proposal.hash, expectedHead, actualHead: inspected?.headSha ?? null, outcome: "denied", reason: "changed_head" });
+      throw new EngineError("stewardship_changed_head", "Provider-observed head does not match the persisted repository submission head.");
+    }
     if (!Array.isArray(inspected.checks) || !inspected.checks.length || inspected.checks.some(check => typeof check?.status !== "string")) throw new EngineError("stewardship_evidence_unverified", "The repository Provider did not return check results for the exact submission head.");
     const observedAt = inspected.observedAt ?? new Date().toISOString();
     if (!Number.isFinite(Date.parse(observedAt))) throw new EngineError("stewardship_evidence_unverified", "The repository Provider returned an invalid observation time.");
@@ -68,6 +71,7 @@ export class OmniSeed {
     const existing = (state.stewardshipObservations ?? []).find(item => item.id === observation.id);
     if (existing) return structuredClone(existing);
     await this.store.save({ ...state, stewardshipObservations: [...(state.stewardshipObservations ?? []), observation], history: [...state.history, { type: "stewardship_proposal_observed", proposalId: proposal.id, observationId: observation.id, headSha: observation.headSha, actorId: authorization.actorId, at: observedAt }] }, state.version);
+    await this.#emitCompanyWorkFactSafely(declaration.metadata.id, { type: "checks", proposalId: proposal.id, proposalHash: proposal.hash, headSha: observation.headSha, observationId: observation.id, checks: observation.checks });
     return observation;
   }
   async evaluateStewardship(declaration, input, authorization) {
@@ -113,7 +117,9 @@ export class OmniSeed {
     const state = await this.store.load(declaration.metadata.id), at = new Date().toISOString();
     const nextBinding = { ...(state.binding ?? {}), ...normalizeBinding(binding) };
     if (JSON.stringify(nextBinding) === JSON.stringify(state.binding ?? {})) return structuredClone(state);
-    return this.store.save({ ...state, binding: nextBinding, history: [...state.history, { type: "company_binding_recorded", actorId: authorization.actorId, desiredRevision: nextBinding.desiredRevision ?? null, observedRevision: nextBinding.observedRevision ?? null, at }] }, state.version);
+    const saved = await this.store.save({ ...state, binding: nextBinding, history: [...state.history, { type: "company_binding_recorded", actorId: authorization.actorId, desiredRevision: nextBinding.desiredRevision ?? null, observedRevision: nextBinding.observedRevision ?? null, at }] }, state.version);
+    if (nextBinding.desiredRevision !== state.binding?.desiredRevision) await this.#emitCompanyWorkFactSafely(declaration.metadata.id, { type: "desired_revision", desiredRevision: nextBinding.desiredRevision });
+    return saved;
   }
   async listActivity(declaration, authorization) {
     authorize(authorization, ["activity.read"]);
@@ -127,9 +133,13 @@ export class OmniSeed {
     return this.#mutateCompanyWork(declaration.metadata.id, state => {
       const existing = input?.idempotencyKey && state.runs.find(item => item.idempotencyKey === input.idempotencyKey);
       if (existing) return { unchanged: true, result: projectCompanyWorkRun(existing) };
-      const run = createCompanyWorkRun({ declaration, intent: input?.intent, idempotencyKey: input?.idempotencyKey, actorId: authorization.actorId, desiredRevision: runtime.binding?.desiredRevision ?? this.binding.desiredRevision ?? null, observedRevision: runtime.binding?.observedRevision ?? null });
+      const conversation = input?.conversationId ? state.conversations.find(item => item.id === input.conversationId) : null;
+      if (input?.conversationId && !conversation) throw new EngineError("company_work_conversation_not_found", `Company work conversation does not exist: ${input.conversationId}`);
+      if (conversation && conversation.actorId !== authorization.actorId) throw new EngineError("authorization_denied", "A work segment cannot join another actor's conversation.");
+      let run = createCompanyWorkRun({ declaration, intent: input?.intent, idempotencyKey: input?.idempotencyKey, conversationId: input?.conversationId, actorId: authorization.actorId, desiredRevision: runtime.binding?.desiredRevision ?? this.binding.desiredRevision ?? null, observedRevision: runtime.binding?.observedRevision ?? null });
+      if (conversation?.session) run = { ...run, session: structuredClone(conversation.session) };
       return {
-        state: { ...state, runs: [...state.runs, run] },
+        state: { ...state, runs: [...state.runs, run], conversations: conversation ? state.conversations : [...state.conversations, { id: run.conversationId, companyId: run.companyId, actorId: run.actorId, session: null, createdAt: run.createdAt, updatedAt: run.updatedAt }] },
         result: projectCompanyWorkRun(run),
       };
     });
@@ -141,11 +151,20 @@ export class OmniSeed {
   async getCompanyWork(declaration, runId, authorization, { includeRuntime = false } = {}) {
     authorize(authorization, [includeRuntime ? "company_work.record" : "company_work.read"]);
     const run = requireWorkRun(await this.workStore.load(declaration.metadata.id), runId);
-    return includeRuntime ? structuredClone(run) : projectCompanyWorkRun(run);
+    return includeRuntime ? runtimeCompanyWorkRun(run) : projectCompanyWorkRun(run);
   }
   async attachCompanyWorkSession(declaration, runId, session, authorization) {
     authorize(authorization, ["company_work.record"]);
-    return this.#updateCompanyWork(declaration, runId, authorization, run => attachCompanyWorkSession(run, session), "company_work_session_attached");
+    return this.#mutateCompanyWork(declaration.metadata.id, state => {
+      const current = requireWorkRun(state, runId), next = attachCompanyWorkSession(current, session);
+      const conversation = state.conversations.find(item => item.id === current.conversationId);
+      if (conversation?.session && (conversation.session.protocolId !== next.session.protocolId || conversation.session.runtimeSessionId !== next.session.runtimeSessionId)) throw new EngineError("company_work_session_conflict", "A conversation cannot be rebound to another Agent protocol session.");
+      const indexed = { id: current.conversationId, companyId: current.companyId, actorId: current.actorId, session: structuredClone(next.session), createdAt: current.createdAt, updatedAt: next.updatedAt };
+      const conversations = conversation
+        ? state.conversations.map(item => item.id === current.conversationId ? { ...item, session: indexed.session, updatedAt: indexed.updatedAt } : item)
+        : [...state.conversations, indexed];
+      return { state: { ...state, runs: state.runs.map(item => item.id === runId ? next : item), conversations }, result: projectCompanyWorkRun(next) };
+    });
   }
   async recordCompanyWorkEvent(declaration, runId, input, authorization) {
     authorize(authorization, ["company_work.record"]);
@@ -153,14 +172,14 @@ export class OmniSeed {
       let next = input?.mutation === true ? markCompanyWorkMutating(run, activeRuns) : run;
       next = recordCompanyWorkEvent(next, input?.event);
       if (input?.associations) next = associateCompanyWork(next, input.associations);
-      if (input?.status) next = transitionCompanyWorkRun(next, input.status, { summary: input.summary });
+      if (input?.status) next = transitionCompanyWorkRun(next, input.status, { summary: input.summary, awaited: input.awaited });
       return next;
     }, "company_work_event_recorded", { quiet: true });
   }
   async continueCompanyWork(declaration, runId, input, authorization) {
     authorize(authorization, ["company_work.create"]);
     return this.#updateCompanyWork(declaration, runId, authorization, run => {
-      if (!["waiting_for_input", "waiting_for_company_approval", "waiting_for_checks", "observing"].includes(run.status)) throw new EngineError("company_work_invalid_state", `Company work cannot receive input while ${run.status}.`);
+      if (!["waiting_for_input", "waiting_for_user_input"].includes(run.status)) throw new EngineError("company_work_invalid_state", `Company work cannot receive user input while ${run.status}.`);
       const message = String(input?.message ?? "").trim();
       if (!message) throw new EngineError("company_work_invalid", "A follow-up message is required.");
       let next = recordCompanyWorkEvent(run, { id: `${run.id}:input:${run.events.length}`, type: "company_work_input_received", summary: message });
@@ -171,6 +190,33 @@ export class OmniSeed {
   async cancelCompanyWork(declaration, runId, authorization) {
     authorize(authorization, ["company_work.cancel"]);
     return this.#updateCompanyWork(declaration, runId, authorization, run => transitionCompanyWorkRun(run, "cancelled"), "company_work_cancelled");
+  }
+  async #emitCompanyWorkFact(companyId, fact) {
+    return this.#mutateCompanyWork(companyId, state => {
+      const additions = state.runs.filter(run => !COMPANY_WORK_TERMINAL_STATES.has(run.status)).map(run => continuationEventFor(run, fact)).filter(Boolean).filter(event => !state.continuationEvents.some(item => item.id === event.id));
+      if (!additions.length) return { unchanged: true, result: [] };
+      return { state: { ...state, continuationEvents: [...state.continuationEvents, ...additions] }, result: additions.map(projectContinuationEvent) };
+    });
+  }
+  async claimCompanyWorkContinuation(declaration, { protocolId, claimantId, leaseMs = 60_000 } = {}, authorization) {
+    authorize(authorization, ["company_work.record"]); const now = Date.now(), at = new Date(now).toISOString();
+    return this.#mutateCompanyWork(declaration.metadata.id, state => {
+      const event = state.continuationEvents.find(item => item.protocolId === protocolId && (item.status === "pending" || (item.status === "claimed" && Date.parse(item.claimExpiresAt) <= now)) && !COMPANY_WORK_TERMINAL_STATES.has(requireWorkRun(state, item.workSegmentId).status));
+      if (!event) return { unchanged: true, result: null };
+      const claimed = { ...event, status: "claimed", claimedBy: String(claimantId ?? authorization.actorId), claimedAt: at, claimExpiresAt: new Date(now + Math.max(1_000, Math.min(Number(leaseMs) || 60_000, 3_600_000))).toISOString() };
+      return { state: { ...state, continuationEvents: state.continuationEvents.map(item => item.id === event.id ? claimed : item) }, result: projectContinuationEvent(claimed) };
+    });
+  }
+  async completeCompanyWorkContinuation(declaration, eventId, { claimantId, outcome = "continued" } = {}, authorization) {
+    authorize(authorization, ["company_work.record"]);
+    return this.#mutateCompanyWork(declaration.metadata.id, state => {
+      const event = state.continuationEvents.find(item => item.id === eventId); if (!event) throw new EngineError("company_work_continuation_not_found", `Continuation event does not exist: ${eventId}`);
+      if (event.status === "completed") return { unchanged: true, result: projectContinuationEvent(event) };
+      if (event.status !== "claimed" || event.claimedBy !== String(claimantId ?? authorization.actorId)) throw new EngineError("company_work_continuation_claim_invalid", "Only the current claimant may complete a continuation event.");
+      const run = requireWorkRun(state, event.workSegmentId); if (COMPANY_WORK_TERMINAL_STATES.has(run.status)) throw new EngineError("company_work_invalid_state", "A terminal or cancelled work segment cannot resume.");
+      const at = new Date().toISOString(), completed = { ...event, status: "completed", completedAt: at, outcome: String(outcome) }, resumed = transitionCompanyWorkRun(recordCompanyWorkEvent(run, { id: `${event.id}:delivered`, type: "company_work_continuation_delivered", reference: event.id, at }), "running");
+      return { state: { ...state, runs: state.runs.map(item => item.id === run.id ? resumed : item), continuationEvents: state.continuationEvents.map(item => item.id === event.id ? completed : item) }, result: projectContinuationEvent(completed) };
+    });
   }
   async plan(declaration, authorization) {
     authorize(authorization, ["plan.create"]);
@@ -209,6 +255,7 @@ export class OmniSeed {
     const approved = { ...stored, status: "approved", approval, approvedActionIds: approval.approvedActionIds, approvedStateVersion: approval.stateVersion };
     const next = await this.store.save({ ...state, plans: state.plans.map(item => item.id === plan.id ? approved : item), history: [...state.history, { type: "plan_approved", planId: plan.id, planHash: plan.hash, actorId: authorization.actorId, actionIds: approval.approvedActionIds, at: approvedAt }] }, state.version);
     if (next.version !== approval.stateVersion) throw new Error("Approval persistence version invariant failed");
+    await this.#emitCompanyWorkFactSafely(plan.companyId, { type: "company_approval", planId: plan.id, planHash: plan.hash, approvedActionIds: approval.approvedActionIds });
     return approval;
   }
   async apply(declaration, plan, approval, authorization) {
@@ -239,6 +286,7 @@ export class OmniSeed {
       results.push({ action, deployment, observation });
     }
     const next = await this.store.save({ ...state, deployed, observed, evidence, plans: state.plans.map(item => item.id === plan.id ? { ...item, status: "applied", appliedActionIds: [...allowed] } : item), history: [...state.history, { type: "plan_applied", planId: plan.id, actorId: authorization.actorId, at: new Date().toISOString(), actionIds: [...allowed] }] }, state.version);
+    await this.#emitCompanyWorkFactSafely(declaration.metadata.id, { type: "apply", planId: plan.id, planHash: plan.hash, appliedActionIds: [...allowed] });
     return { plan: { ...plan, status: "applied", appliedActionIds: [...allowed] }, state: next, registry: await this.inspect(active), results };
   }
   async reconcile(declaration, authorization) {
@@ -250,6 +298,7 @@ export class OmniSeed {
     }
     const at = new Date().toISOString(), observedRevision = state.binding?.desiredRevision ?? state.binding?.observedRevision ?? null;
     await this.store.save({ ...state, binding: { ...(state.binding ?? {}), observedRevision }, observed, history: [...state.history, { type: "reconciled", actorId: authorization.actorId, observedRevision, at }] }, state.version);
+    await this.#emitCompanyWorkFactSafely(declaration.metadata.id, { type: "observation", observedRevision });
     return this.inspect(declaration);
   }
   async proposeCompanyChange(declaration, request, authorization) {
@@ -286,6 +335,7 @@ export class OmniSeed {
     const approval = { proposalId, proposalHash, actorId: authorization.actorId, permissions: [...authorization.permissions], approvedAt: new Date().toISOString() };
     const approved = { ...proposal, status: "approved", approval };
     await this.store.save({ ...state, companyChanges: replaceProposal(state, approved), history: [...state.history, { type: "company_change_approved", proposalId, proposalHash, actorId: authorization.actorId, at: approval.approvedAt }] }, state.version);
+    await this.#emitCompanyWorkFactSafely(declaration.metadata.id, { type: "company_approval", proposalId, proposalHash });
     return approval;
   }
   async rejectCompanyChange(declaration, proposalId, reason, authorization) {
@@ -327,6 +377,7 @@ export class OmniSeed {
     const mergedProposal = { ...proposal, status: "merged", merge };
     const recordedAt = new Date().toISOString(), mergeEvidence = createCompanyChangeMergeEvidence(state, proposal, merge, recordedAt);
     const next = await this.store.save({ ...state, companyChanges: replaceProposal(state, mergedProposal), evidence: [...state.evidence, mergeEvidence, ...(merge.evidence ?? [])], history: [...state.history, { type: "company_change_merged", proposalId, actorId: authorization.actorId, pullRequest: proposal.submission.pullRequest, mergeCommitSha: merge.mergeCommitSha, at: merge.mergedAt ?? recordedAt }] }, state.version);
+    await this.#emitCompanyWorkFactSafely(declaration.metadata.id, { type: "merge", proposalId, proposalHash: proposal.hash, headSha: proposal.submission.commit ?? proposal.submission.headSha ?? null, mergeCommitSha: merge.mergeCommitSha });
     return { proposal: mergedProposal, state: next, merge };
   }
   async #markCompanyChangeStale(state, proposal, authorization, actualDefinitionHash) {
@@ -348,7 +399,8 @@ export class OmniSeed {
       const current = requireWorkRun(state, runId), next = update(current, state.runs);
       if (isDeepStrictEqual(current, next)) return { unchanged: true, result: projectCompanyWorkRun(current) };
       const runs = state.runs.map(item => item.id === runId ? next : item);
-      return { state: { ...state, runs }, result: projectCompanyWorkRun(next) };
+      const conversations = next.session ? state.conversations.map(item => item.id === next.conversationId ? { ...item, session: structuredClone(next.session), updatedAt: next.updatedAt } : item) : state.conversations;
+      return { state: { ...state, runs, conversations }, result: projectCompanyWorkRun(next) };
     });
   }
   async #mutateCompanyWork(companyId, mutation) {
@@ -359,6 +411,10 @@ export class OmniSeed {
       catch (error) { if (!/Company work conflict/i.test(error.message) || attempt === 4) throw error; }
     }
     throw new EngineError("company_work_conflict", "Company work state could not be updated after concurrent writes.");
+  }
+  async #emitCompanyWorkFactSafely(companyId, fact) {
+    try { return await this.#emitCompanyWorkFact(companyId, fact); }
+    catch { return []; }
   }
 }
 
