@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseOmniform } from "@omniseed/omniform";
@@ -49,6 +49,24 @@ test("company work is durable, idempotent, and keeps Eve continuation data out o
   assert.doesNotMatch(JSON.stringify((await restarted.inspect(declaration)).workRuns), /eve:secret/);
   assert.doesNotMatch(await readFile(path, "utf8").catch(() => ""), /eve:secret/);
   assert.match(await readFile(workPath, "utf8"), /eve:secret/);
+});
+
+test("an unattached legacy company work run can attach its first session after on-disk migration", async () => {
+  const path = join(await mkdtemp(join(tmpdir(), "omniseed-legacy-work-")), "state.json");
+  const run = {
+    id: "legacy-work", companyId: "acme", actorId: "lily", initiatedBy: "lily", intent: "Resume queued work", idempotencyKey: null,
+    mode: "inspection", status: "queued", desiredRevisionAtStart: null, observedRevisionAtStart: null,
+    session: { id: null, continuationToken: null, streamIndex: 0, lastEventId: null, turnId: null },
+    associations: { operationIds: [], planIds: [], proposalIds: [], providerActionIds: [], evidenceIds: [], outcomeIds: [] },
+    events: [{ id: "legacy-work:created", type: "company_work_started", at: "2026-01-01T00:00:00.000Z", summary: "Resume queued work" }],
+    createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", completedAt: null,
+  };
+  await writeFile(path, `${JSON.stringify({ version: 1, companyId: "acme", runs: [run] })}\n`, "utf8");
+  const engine = new OmniSeed({ store: new MemoryStateStore(), workStore: new JsonCompanyWorkStore(path), providers: new ProviderRegistry() });
+
+  assert.equal((await engine.getCompanyWork(declaration, run.id, lily)).session, null);
+  const attached = await engine.attachCompanyWorkSession(declaration, run.id, { protocolId: "example.agent/1", runtimeSessionId: "runtime-1", continuation: "private" }, lily);
+  assert.deepEqual(attached.session, { protocolId: "example.agent/1", runtimeSessionId: "runtime-1", cursor: 0, lastEventId: null, turnId: null });
 });
 
 test("a company work run resumes the same session and deduplicates durable Eve events", async () => {

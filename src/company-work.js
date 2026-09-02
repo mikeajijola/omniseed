@@ -16,11 +16,12 @@ export function createCompanyWorkRun({ declaration, intent, actorId, idempotency
 }
 
 export function migrateCompanyWorkState(state, companyId = null) {
-  const result = { version: state?.version ?? 0, companyId: state?.companyId ?? companyId, runs: [], conversations: structuredClone(state?.conversations ?? []), continuationEvents: structuredClone(state?.continuationEvents ?? []) };
+  const conversations = structuredClone(state?.conversations ?? []).map(conversation => ({ ...conversation, session: migrateLegacySession(conversation.session) }));
+  const result = { version: state?.version ?? 0, companyId: state?.companyId ?? companyId, runs: [], conversations, continuationEvents: structuredClone(state?.continuationEvents ?? []) };
   for (const source of state?.runs ?? []) {
     const run = structuredClone(source); run.segmentId ??= run.id; run.conversationId ??= `legacy:${run.id}`; run.await ??= legacyWait(run.status, run.associations);
     run.associations = { operationIds: [], planIds: [], proposalIds: [], providerActionIds: [], evidenceIds: [], outcomeIds: [], ...(run.associations ?? {}) };
-    if (run.session?.protocolId == null && run.session?.id) run.session = { protocolId: EVE_COMPATIBILITY_PROTOCOL, runtimeSessionId: run.session.id, cursor: run.session.streamIndex ?? 0, continuation: run.session.continuationToken ?? null, lastEventId: run.session.lastEventId ?? null, turnId: run.session.turnId ?? null };
+    run.session = migrateLegacySession(run.session);
     result.runs.push(run);
     if (run.session && !result.conversations.some(item => item.id === run.conversationId)) result.conversations.push({ id: run.conversationId, companyId: run.companyId, actorId: run.actorId, session: run.session, createdAt: run.createdAt, updatedAt: run.updatedAt });
   }
@@ -65,6 +66,12 @@ export function projectContinuationEvent(event) { return structuredClone(event);
 export function resolveStewardActorId(declaration) { const realisation = (declaration.spec.realisations ?? []).find(item => item.id === declaration.spec.stewardship?.realisation), agents = new Set((declaration.spec.resources?.agents ?? []).map(item => item.id)); return realisation?.participants?.find(item => agents.has(item.resource))?.resource ?? null; }
 
 function normalizeAwait(value, status) { if (!value) return null; return { type: required(value.type, "Awaited fact type"), reference: value.reference && typeof value.reference === "object" ? structuredClone(value.reference) : {}, status: status ?? null }; }
+function migrateLegacySession(session) {
+  if (!session || session.protocolId != null) return session ?? null;
+  const runtimeSessionId = optional(session.id);
+  if (!runtimeSessionId) return null;
+  return { protocolId: EVE_COMPATIBILITY_PROTOCOL, runtimeSessionId, cursor: session.streamIndex ?? 0, continuation: session.continuationToken ?? null, lastEventId: session.lastEventId ?? null, turnId: session.turnId ?? null };
+}
 function matches(awaited, fact) { return awaited.type === fact.type && Object.entries(awaited.reference ?? {}).every(([key, value]) => JSON.stringify(fact[key]) === JSON.stringify(value)); }
 function legacyWait(status, associations = {}) { const type = ({ waiting_for_company_approval: "company_approval", waiting_for_checks: "checks", waiting_for_merge: "merge", waiting_for_desired_revision: "desired_revision", waiting_for_apply: "apply", waiting_for_observation: "observation" })[status]; if (!type) return null; const reference = {}; if (associations.planIds?.length === 1) reference.planId = associations.planIds[0]; if (associations.proposalIds?.length === 1) reference.proposalId = associations.proposalIds[0]; return { type, reference, status }; }
 function normalizeEvent(event, at) { const id = required(event?.id, "Company work event ID"), type = required(event?.type, "Company work event type"); return { id, type, at: optional(event.at) ?? at, ...(optional(event.summary) ? { summary: String(event.summary).slice(0, 2_000) } : {}), ...(optional(event.operationId) ? { operationId: event.operationId } : {}), ...(optional(event.status) ? { status: event.status } : {}), ...(optional(event.reference) ? { reference: event.reference } : {}) }; }
