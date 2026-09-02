@@ -4,7 +4,7 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseOmniform } from "@omniseed/omniform";
-import { JsonCompanyWorkStore, JsonStateStore, MemoryCompanyWorkStore, MemoryStateStore, OmniSeed, ProviderRegistry } from "../src/index.js";
+import { continuationEventFor, JsonCompanyWorkStore, JsonStateStore, MemoryCompanyWorkStore, MemoryStateStore, OmniSeed, ProviderRegistry } from "../src/index.js";
 
 const declaration = parseOmniform(`apiVersion: omniform.org/v1alpha1
 kind: Company
@@ -133,20 +133,26 @@ test("runtime-neutral conversations retain separate auditable work segments", as
   assert.equal((await engine.getCompanyWork(declaration, second.id, lily, { includeRuntime: true })).session.continuation.credential, "server-secret");
 });
 
-test("exact governance facts create one restart-safe claimable continuation", async () => {
-  const workStore = new MemoryCompanyWorkStore(), first = new OmniSeed({ store: new MemoryStateStore(), workStore, providers: new ProviderRegistry() });
-  const run = await first.startCompanyWork(declaration, { intent: "Wait for approval" }, lily);
-  await first.attachCompanyWorkSession(declaration, run.id, { protocolId: "fake.agent/1", runtimeSessionId: "session-a", continuation: "private" }, lily);
-  await first.recordCompanyWorkEvent(declaration, run.id, { status: "waiting_for_company_approval", awaited: { type: "company_approval", reference: { proposalId: "proposal-a", proposalHash: "hash-a" } }, associations: { proposalIds: ["proposal-a"] }, event: { id: "wait-1", type: "governance_wait" } }, lily);
-  assert.deepEqual(await first.emitCompanyWorkFact("acme", { type: "company_approval", proposalId: "another", proposalHash: "hash-a" }), []);
-  const [created] = await first.emitCompanyWorkFact("acme", { type: "company_approval", proposalId: "proposal-a", proposalHash: "hash-a" });
-  assert.equal((await first.emitCompanyWorkFact("acme", { type: "company_approval", proposalId: "proposal-a", proposalHash: "hash-a" })).length, 0);
-  const restarted = new OmniSeed({ store: new MemoryStateStore(), workStore, providers: new ProviderRegistry() });
-  const claimed = await restarted.claimCompanyWorkContinuation(declaration, { protocolId: "fake.agent/1", claimantId: "adapter-a" }, lily);
-  assert.equal(claimed.id, created.id);
-  await restarted.completeCompanyWorkContinuation(declaration, claimed.id, { claimantId: "adapter-a" }, lily);
-  assert.equal((await restarted.getCompanyWork(declaration, run.id, lily)).status, "running");
-  assert.equal(await restarted.claimCompanyWorkContinuation(declaration, { protocolId: "fake.agent/1", claimantId: "adapter-a" }, lily), null);
+test("raw governance facts cannot be forged through the public Engine surface", async () => {
+  const engine = new OmniSeed({ store: new MemoryStateStore(), providers: new ProviderRegistry() });
+  assert.equal(engine.emitCompanyWorkFact, undefined);
+  for (const fact of [
+    { type: "merge", proposalId: "forged" },
+    { type: "apply", planId: "forged" },
+    { type: "company_approval", planId: "forged" },
+    { type: "observation", observedRevision: "forged" },
+  ]) await assert.rejects(Promise.resolve().then(() => engine.emitCompanyWorkFact("acme", fact)), error => error instanceof TypeError);
+});
+
+test("invalid low-level fact shapes fail before any durable work mutation", async () => {
+  let saves = 0;
+  const workStore = new MemoryCompanyWorkStore();
+  const originalSave = workStore.save.bind(workStore);
+  workStore.save = async (...args) => { saves += 1; return originalSave(...args); };
+  const before = await workStore.load("acme");
+  assert.throws(() => continuationEventFor({ await: { type: "apply", reference: {} } }, { type: "apply", planId: "plan", planHash: "not-a-digest", appliedActionIds: [] }), error => error.code === "company_work_fact_invalid");
+  assert.deepEqual(await workStore.load("acme"), before);
+  assert.equal(saves, 0);
 });
 
 test("plan governance operations emit continuation events through their real operation paths", async () => {
@@ -168,7 +174,13 @@ test("plan governance operations emit continuation events through their real ope
   await engine.apply(declaration, plan, approval, operator);
   await engine.reconcile(declaration, operator);
 
-  assert.deepEqual((await workStore.load("acme")).continuationEvents.map(event => event.fact.type).sort(), ["apply", "company_approval", "observation"]);
+  const workState = await workStore.load("acme");
+  assert.deepEqual(workState.continuationEvents.map(event => event.fact.type).sort(), ["apply", "company_approval", "observation"]);
+  for (const event of workState.continuationEvents) {
+    const run = workState.runs.find(item => item.id === event.workSegmentId);
+    assert.equal(event.id, continuationEventFor(run, event.fact, event.createdAt).id);
+    if (event.fact.type !== "observation") assert.equal(event.fact.planHash, plan.hash);
+  }
 });
 
 test("auxiliary continuation write failures do not report committed governance work as failed", async () => {
@@ -193,10 +205,12 @@ test("auxiliary continuation write failures do not report committed governance w
 
 test("cancelled work cannot claim a delayed continuation", async () => {
   const engine = new OmniSeed({ store: new MemoryStateStore(), providers: new ProviderRegistry() });
+  const operator = { actorId: "owner", permissions: ["plan.create", "plan.approve"] };
+  const plan = await engine.plan(declaration, operator);
   const run = await engine.startCompanyWork(declaration, { intent: "Wait" }, lily);
   await engine.attachCompanyWorkSession(declaration, run.id, { protocolId: "fake.agent/1", runtimeSessionId: "session-b", continuation: "private" }, lily);
-  await engine.recordCompanyWorkEvent(declaration, run.id, { status: "waiting_for_merge", awaited: { type: "merge", reference: { proposalId: "p" } }, event: { id: "wait", type: "governance_wait" } }, lily);
-  await engine.emitCompanyWorkFact("acme", { type: "merge", proposalId: "p", mergeCommitSha: "abc" });
+  await engine.recordCompanyWorkEvent(declaration, run.id, { status: "waiting_for_company_approval", awaited: { type: "company_approval", reference: { planId: plan.id, planHash: plan.hash } }, event: { id: "wait", type: "governance_wait" } }, lily);
+  await engine.approve(plan, [], operator);
   await engine.cancelCompanyWork(declaration, run.id, lily);
   assert.equal(await engine.claimCompanyWorkContinuation(declaration, { protocolId: "fake.agent/1" }, lily), null);
 });

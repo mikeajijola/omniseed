@@ -188,7 +188,7 @@ export class OmniSeed {
     authorize(authorization, ["company_work.cancel"]);
     return this.#updateCompanyWork(declaration, runId, authorization, run => transitionCompanyWorkRun(run, "cancelled"), "company_work_cancelled");
   }
-  async emitCompanyWorkFact(companyId, fact) {
+  async #emitCompanyWorkFact(companyId, fact) {
     return this.#mutateCompanyWork(companyId, state => {
       const additions = state.runs.filter(run => !COMPANY_WORK_TERMINAL_STATES.has(run.status)).map(run => continuationEventFor(run, fact)).filter(Boolean).filter(event => !state.continuationEvents.some(item => item.id === event.id));
       if (!additions.length) return { unchanged: true, result: [] };
@@ -410,7 +410,7 @@ export class OmniSeed {
     throw new EngineError("company_work_conflict", "Company work state could not be updated after concurrent writes.");
   }
   async #emitCompanyWorkFactSafely(companyId, fact) {
-    try { return await this.emitCompanyWorkFact(companyId, fact); }
+    try { return await this.#emitCompanyWorkFact(companyId, fact); }
     catch { return []; }
   }
 }
