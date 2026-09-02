@@ -51,7 +51,7 @@ test("company work is durable, idempotent, and keeps Eve continuation data out o
   assert.match(await readFile(workPath, "utf8"), /eve:secret/);
 });
 
-test("an unattached legacy company work run can attach its first session after on-disk migration", async () => {
+test("an unattached legacy run indexes its conversation on attach and persists later joins across restarts", async () => {
   const path = join(await mkdtemp(join(tmpdir(), "omniseed-legacy-work-")), "state.json");
   const run = {
     id: "legacy-work", companyId: "acme", actorId: "lily", initiatedBy: "lily", intent: "Resume queued work", idempotencyKey: null,
@@ -67,6 +67,17 @@ test("an unattached legacy company work run can attach its first session after o
   assert.equal((await engine.getCompanyWork(declaration, run.id, lily)).session, null);
   const attached = await engine.attachCompanyWorkSession(declaration, run.id, { protocolId: "example.agent/1", runtimeSessionId: "runtime-1", continuation: "private" }, lily);
   assert.deepEqual(attached.session, { protocolId: "example.agent/1", runtimeSessionId: "runtime-1", cursor: 0, lastEventId: null, turnId: null });
+
+  const restarted = new OmniSeed({ store: new MemoryStateStore(), workStore: new JsonCompanyWorkStore(path), providers: new ProviderRegistry() });
+  const joined = await restarted.startCompanyWork(declaration, { intent: "Continue migrated conversation", conversationId: attached.conversationId }, lily);
+  assert.notEqual(joined.id, attached.id);
+  assert.equal(joined.conversationId, attached.conversationId);
+  assert.deepEqual(joined.session, attached.session);
+
+  const restartedAgain = new OmniSeed({ store: new MemoryStateStore(), workStore: new JsonCompanyWorkStore(path), providers: new ProviderRegistry() });
+  const persisted = await restartedAgain.getCompanyWork(declaration, joined.id, lily, { includeRuntime: true });
+  assert.equal(persisted.session.runtimeSessionId, "runtime-1");
+  assert.equal(persisted.session.continuation, "private");
 });
 
 test("a company work run resumes the same session and deduplicates durable Eve events", async () => {

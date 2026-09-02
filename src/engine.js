@@ -159,7 +159,10 @@ export class OmniSeed {
       const current = requireWorkRun(state, runId), next = attachCompanyWorkSession(current, session);
       const conversation = state.conversations.find(item => item.id === current.conversationId);
       if (conversation?.session && (conversation.session.protocolId !== next.session.protocolId || conversation.session.runtimeSessionId !== next.session.runtimeSessionId)) throw new EngineError("company_work_session_conflict", "A conversation cannot be rebound to another Agent protocol session.");
-      const conversations = state.conversations.map(item => item.id === current.conversationId ? { ...item, session: structuredClone(next.session), updatedAt: next.updatedAt } : item);
+      const indexed = { id: current.conversationId, companyId: current.companyId, actorId: current.actorId, session: structuredClone(next.session), createdAt: current.createdAt, updatedAt: next.updatedAt };
+      const conversations = conversation
+        ? state.conversations.map(item => item.id === current.conversationId ? { ...item, session: indexed.session, updatedAt: indexed.updatedAt } : item)
+        : [...state.conversations, indexed];
       return { state: { ...state, runs: state.runs.map(item => item.id === runId ? next : item), conversations }, result: projectCompanyWorkRun(next) };
     });
   }
