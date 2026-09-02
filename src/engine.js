@@ -17,7 +17,7 @@ export class OmniSeed {
     const active = activeDeclaration(declaration, state);
     const resolutions = this.resolver.resolveCompany({ declaration: active, currentState: state, providerRegistry: this.providers });
     const persistedBinding = Object.fromEntries(Object.entries(state.binding ?? {}).filter(([, value]) => value != null));
-    return { ...compileCompany(active, state, { providerRegistry: this.providers, resolutions, operationRegistry: this.operations, binding: { ...this.binding, ...persistedBinding } }), workRuns: workState.runs.map(projectCompanyWorkRun), definitionHash: definitionHash(active) };
+    return { ...compileCompany(active, state, { providerRegistry: this.providers, resolutions, operationRegistry: this.operations, binding: { ...this.binding, ...persistedBinding } }), workRuns: workState.runs.map(projectCompanyWorkRun), definition: structuredClone(active), definitionHash: definitionHash(active) };
   }
   async inspectStewardship(declaration, authorization) {
     authorize(authorization, ["stewardship.read"]);
@@ -304,7 +304,11 @@ export class OmniSeed {
   async proposeCompanyChange(declaration, request, authorization) {
     authorize(authorization, ["company_change.propose"]);
     const state = await this.store.load(declaration.metadata.id), active = activeDeclaration(declaration, state);
-    const proposal = createCompanyChangeProposal({ declaration: active, request, actor: authorization, evidence: state.evidence });
+    const baseDesiredRevision = state.binding?.desiredRevision ?? this.binding.desiredRevision ?? null;
+    const activeDefinitionHash = definitionHash(active);
+    if (request.baseDefinitionHash !== undefined && request.baseDefinitionHash !== activeDefinitionHash) throw new EngineError("company_change_stale", "Company definition changed after it was inspected", { expected: request.baseDefinitionHash, actual: activeDefinitionHash });
+    if (request.baseDesiredRevision !== undefined && request.baseDesiredRevision !== baseDesiredRevision) throw new EngineError("company_change_stale", "Company desired revision changed after it was inspected", { expected: request.baseDesiredRevision, actual: baseDesiredRevision });
+    const proposal = createCompanyChangeProposal({ declaration: active, request, actor: authorization, evidence: state.evidence, baseDesiredRevision });
     if ((state.companyChanges ?? []).some(item => item.id === proposal.id)) throw new EngineError("company_change_conflict", `Proposal already exists: ${proposal.id}`);
     await this.store.save({ ...state, companyChanges: [...(state.companyChanges ?? []), proposal], history: [...state.history, { type: "company_change_proposed", proposalId: proposal.id, proposalHash: proposal.hash, actorId: authorization.actorId, evidence: proposal.evidence, at: proposal.createdAt }] }, state.version);
     return proposal;
@@ -331,6 +335,7 @@ export class OmniSeed {
     authorize(authorization, proposal.requiredAuthority.approve);
     if (proposal.status !== "proposed") throw new EngineError("company_change_invalid_state", `Only proposed changes can be approved; found ${proposal.status}`);
     if (!verifyCompanyChangeProposal(proposal) || proposal.hash !== proposalHash) throw new EngineError("approval_invalid", "Approval does not bind the exact persisted proposal");
+    if (proposal.baseDesiredRevision && proposal.baseDesiredRevision !== (state.binding?.desiredRevision ?? this.binding.desiredRevision ?? null)) return this.#markCompanyChangeStale(state, proposal, authorization, definitionHash(active), { message: "Company desired revision changed after the proposal was created", expected: proposal.baseDesiredRevision, actual: state.binding?.desiredRevision ?? this.binding.desiredRevision ?? null });
     if (definitionHash(active) !== proposal.baseDefinitionHash) return this.#markCompanyChangeStale(state, proposal, authorization, definitionHash(active));
     const approval = { proposalId, proposalHash, actorId: authorization.actorId, permissions: [...authorization.permissions], approvedAt: new Date().toISOString() };
     const approved = { ...proposal, status: "approved", approval };
@@ -351,6 +356,7 @@ export class OmniSeed {
     authorize(authorization, proposal.requiredAuthority.apply);
     if (proposal.status !== "approved") throw new EngineError("company_change_invalid_state", `Only approved changes can be applied; found ${proposal.status}`);
     if (!verifyCompanyChangeProposal(proposal) || proposal.approval?.proposalHash !== proposal.hash || proposal.requiredAuthority.approve.some(permission => !(proposal.approval?.permissions ?? []).includes(permission))) throw new EngineError("approval_invalid", "Stored approval does not bind the exact persisted proposal and its required approval authority");
+    if (proposal.baseDesiredRevision && proposal.baseDesiredRevision !== (state.binding?.desiredRevision ?? this.binding.desiredRevision ?? null)) return this.#markCompanyChangeStale(state, proposal, authorization, definitionHash(active), { message: "Company desired revision changed after the proposal was created", expected: proposal.baseDesiredRevision, actual: state.binding?.desiredRevision ?? this.binding.desiredRevision ?? null });
     if (definitionHash(active) !== proposal.baseDefinitionHash) return this.#markCompanyChangeStale(state, proposal, authorization, definitionHash(active));
     if (!active.spec.governance?.desiredState) requireStewardshipAuthority(active, state, proposal);
     const candidate = applyDefinitionPatch(active, proposal.patch), resultingDefinitionHash = definitionHash(candidate);
@@ -380,10 +386,10 @@ export class OmniSeed {
     await this.#emitCompanyWorkFactSafely(declaration.metadata.id, { type: "merge", proposalId, proposalHash: proposal.hash, headSha: proposal.submission.commit ?? proposal.submission.headSha ?? null, mergeCommitSha: merge.mergeCommitSha });
     return { proposal: mergedProposal, state: next, merge };
   }
-  async #markCompanyChangeStale(state, proposal, authorization, actualDefinitionHash) {
+  async #markCompanyChangeStale(state, proposal, authorization, actualDefinitionHash, error = { message: "Company definition changed after the proposal was created", expected: proposal.baseDefinitionHash, actual: actualDefinitionHash }) {
     const staleAt = new Date().toISOString(), changed = { ...proposal, status: "stale", staleAt };
     await this.store.save({ ...state, companyChanges: replaceProposal(state, changed), history: [...state.history, { type: "company_change_stale", proposalId: proposal.id, actorId: authorization.actorId, at: staleAt }] }, state.version);
-    throw new EngineError("company_change_stale", "Company definition changed after the proposal was created", { expected: proposal.baseDefinitionHash, actual: actualDefinitionHash });
+    throw new EngineError("company_change_stale", error.message, { expected: error.expected, actual: error.actual });
   }
   async invokeOperation(declaration, operationId, input, authorization) {
     const state = await this.store.load(declaration.metadata.id), active = activeDeclaration(declaration, state);

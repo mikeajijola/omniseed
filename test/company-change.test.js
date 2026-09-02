@@ -23,6 +23,7 @@ spec:
     - { id: approve_company_change, capability: customer_support, description: Approve an exact company change, input: {}, output: {}, mutation: true, permissions: [company_change.approve], approval: none, interfaces: [ui, api, cli, agent, machine] }
     - { id: reject_company_change, capability: customer_support, description: Reject a company change, input: {}, output: {}, mutation: true, permissions: [company_change.reject], approval: none, interfaces: [ui, api, cli, agent, machine] }
     - { id: apply_company_change, capability: customer_support, description: Apply an approved company change, input: {}, output: {}, mutation: true, permissions: [company_change.apply], approval: required, interfaces: [ui, api, cli, agent, machine] }
+    - { id: inspect_company, capability: customer_support, description: Inspect the company, input: {}, output: {}, mutation: false, permissions: [company.read], approval: none, interfaces: [lily, ui, api, cli, agent, machine] }
 `;
 
 const declaration = parseOmniform(source);
@@ -46,6 +47,27 @@ test("authorised Lily, human, and machine actors use the same proposal capabilit
     assert.equal(proposal.status, "proposed");
     assert.equal(proposal.hash.length, 64);
   }
+});
+
+test("ordinary inspect-to-propose binds the exact merged desired revision", async () => {
+  const desiredRevision = "a".repeat(40);
+  const store = new MemoryStateStore({ ...stateWithEvidence(), binding: { desiredRevision, observedRevision: desiredRevision } });
+  const subject = new OmniSeed({ store, providers: new ProviderRegistry() });
+  const inspector = { actorId: "lily", actorType: "ai", permissions: ["company.read", "company_change.propose"] };
+  const inspection = await subject.invokeOperation(declaration, "inspect_company", {}, inspector);
+  const patch = [{ op: "replace", path: "/metadata/name", value: `${inspection.definition.metadata.name} Operating Company` }];
+  const proposal = await subject.invokeOperation(declaration, "propose_company_change", { ...request(patch), baseDefinitionHash: inspection.definitionHash, baseDesiredRevision: inspection.instance.desiredRevision }, inspector);
+  assert.equal(proposal.baseDesiredRevision, desiredRevision);
+  assert.equal(proposal.baseDefinitionHash, inspection.definitionHash);
+  assert.equal(inspection.definition.metadata.name, "Acme");
+  assert.equal(proposal.hash.length, 64);
+});
+
+test("inspect-to-propose fails closed when the merged desired revision advanced", async () => {
+  const inspectedRevision = "a".repeat(40), currentRevision = "b".repeat(40);
+  const subject = new OmniSeed({ store: new MemoryStateStore({ ...stateWithEvidence(), binding: { desiredRevision: currentRevision, observedRevision: inspectedRevision } }), providers: new ProviderRegistry() });
+  await assert.rejects(subject.invokeOperation(declaration, "propose_company_change", { ...request(), baseDesiredRevision: inspectedRevision }, actors.lily), error => error.code === "company_change_stale" && error.details.expected === inspectedRevision && error.details.actual === currentRevision);
+  assert.deepEqual((await subject.store.load("acme")).companyChanges, []);
 });
 
 test("proposal creation requires authority and resolvable evidence", async () => {
@@ -226,6 +248,23 @@ test("Provider-backed company repository submits the exact candidate through a w
 
 test("Provider-backed company repository rejects a Provider outside workflows", () => {
   assert.throws(() => new ProviderGitCompanyRepository({ provider: { metadata: { id: "wrong", families: ["agents"], operations: ["company.repository.inspect"] } } }), error => error.code === "company_repository_invalid");
+});
+
+test("Provider-backed submission rejects canonical Git revision drift before mutation", async () => {
+  let mutations = 0;
+  const provider = {
+    metadata: { id: "github_protocol", families: ["workflows"], operations: ["company.repository.inspect"] },
+    async invoke(_operation, input) { return { baseSha: "b".repeat(40), document: { path: input.path, content: source } }; },
+    async validate() { mutations += 1; return { valid: true, issues: [] }; },
+    async plan() { mutations += 1; }, async apply() { mutations += 1; }, async observe() { mutations += 1; }
+  };
+  const repository = new ProviderGitCompanyRepository({ provider });
+  await assert.rejects(repository.submit({
+    authority: { repository: "https://github.com/example/acme.git", branch: "main", path: "omniform.yaml", changeMode: "pull_request" },
+    candidate: applyDefinitionPatch(declaration, request().patch),
+    proposal: { id: "ccp_revision", hash: "hash", reason: "Bind revision", proposedBy: { actorId: "lily" }, patch: request().patch, baseDesiredRevision: "a".repeat(40) }
+  }), error => error.code === "company_change_stale");
+  assert.equal(mutations, 0);
 });
 
 test("Provider-backed company repository preserves YAML comments, ordering, and unrelated bytes", async () => {

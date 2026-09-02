@@ -30,6 +30,7 @@ export class ProviderGitCompanyRepository extends CompanyRepository {
     validateAuthority(authority);
     const repository = repositoryName(authority.repository);
     const repositoryState = await this.inspect({ authority });
+    if (proposal.baseDesiredRevision && repositoryState.baseSha !== proposal.baseDesiredRevision) throw new EngineError("company_change_stale", "Canonical Git revision changed after the Company Change was proposed", { expected: proposal.baseDesiredRevision, actual: repositoryState.baseSha ?? null });
     const branch = `omniseed/${proposal.id}`;
     const action = {
       id: `company_change_${proposal.id}`,
