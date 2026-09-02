@@ -60,7 +60,7 @@ export class OmniSeed {
     const inspected = await this.companyRepository.inspectSubmission({ submission: proposal.submission, proposal, authorization });
     const expectedHead = proposal.submission.commit ?? proposal.submission.headSha ?? null;
     if (!/^[0-9a-f]{40,64}$/i.test(inspected?.headSha ?? "") || String(inspected.headSha).toLowerCase() !== String(expectedHead).toLowerCase()) {
-      await this.emitCompanyWorkFact(declaration.metadata.id, { type: "checks", proposalId: proposal.id, proposalHash: proposal.hash, expectedHead, actualHead: inspected?.headSha ?? null, outcome: "denied", reason: "changed_head" });
+      await this.#emitCompanyWorkFactSafely(declaration.metadata.id, { type: "checks", proposalId: proposal.id, proposalHash: proposal.hash, expectedHead, actualHead: inspected?.headSha ?? null, outcome: "denied", reason: "changed_head" });
       throw new EngineError("stewardship_changed_head", "Provider-observed head does not match the persisted repository submission head.");
     }
     if (!Array.isArray(inspected.checks) || !inspected.checks.length || inspected.checks.some(check => typeof check?.status !== "string")) throw new EngineError("stewardship_evidence_unverified", "The repository Provider did not return check results for the exact submission head.");
@@ -71,7 +71,7 @@ export class OmniSeed {
     const existing = (state.stewardshipObservations ?? []).find(item => item.id === observation.id);
     if (existing) return structuredClone(existing);
     await this.store.save({ ...state, stewardshipObservations: [...(state.stewardshipObservations ?? []), observation], history: [...state.history, { type: "stewardship_proposal_observed", proposalId: proposal.id, observationId: observation.id, headSha: observation.headSha, actorId: authorization.actorId, at: observedAt }] }, state.version);
-    await this.emitCompanyWorkFact(declaration.metadata.id, { type: "checks", proposalId: proposal.id, proposalHash: proposal.hash, headSha: observation.headSha, observationId: observation.id, checks: observation.checks });
+    await this.#emitCompanyWorkFactSafely(declaration.metadata.id, { type: "checks", proposalId: proposal.id, proposalHash: proposal.hash, headSha: observation.headSha, observationId: observation.id, checks: observation.checks });
     return observation;
   }
   async evaluateStewardship(declaration, input, authorization) {
@@ -118,7 +118,7 @@ export class OmniSeed {
     const nextBinding = { ...(state.binding ?? {}), ...normalizeBinding(binding) };
     if (JSON.stringify(nextBinding) === JSON.stringify(state.binding ?? {})) return structuredClone(state);
     const saved = await this.store.save({ ...state, binding: nextBinding, history: [...state.history, { type: "company_binding_recorded", actorId: authorization.actorId, desiredRevision: nextBinding.desiredRevision ?? null, observedRevision: nextBinding.observedRevision ?? null, at }] }, state.version);
-    if (nextBinding.desiredRevision !== state.binding?.desiredRevision) await this.emitCompanyWorkFact(declaration.metadata.id, { type: "desired_revision", desiredRevision: nextBinding.desiredRevision });
+    if (nextBinding.desiredRevision !== state.binding?.desiredRevision) await this.#emitCompanyWorkFactSafely(declaration.metadata.id, { type: "desired_revision", desiredRevision: nextBinding.desiredRevision });
     return saved;
   }
   async listActivity(declaration, authorization) {
@@ -252,7 +252,7 @@ export class OmniSeed {
     const approved = { ...stored, status: "approved", approval, approvedActionIds: approval.approvedActionIds, approvedStateVersion: approval.stateVersion };
     const next = await this.store.save({ ...state, plans: state.plans.map(item => item.id === plan.id ? approved : item), history: [...state.history, { type: "plan_approved", planId: plan.id, planHash: plan.hash, actorId: authorization.actorId, actionIds: approval.approvedActionIds, at: approvedAt }] }, state.version);
     if (next.version !== approval.stateVersion) throw new Error("Approval persistence version invariant failed");
-    await this.emitCompanyWorkFact(plan.companyId, { type: "company_approval", planId: plan.id, planHash: plan.hash, approvedActionIds: approval.approvedActionIds });
+    await this.#emitCompanyWorkFactSafely(plan.companyId, { type: "company_approval", planId: plan.id, planHash: plan.hash, approvedActionIds: approval.approvedActionIds });
     return approval;
   }
   async apply(declaration, plan, approval, authorization) {
@@ -283,7 +283,7 @@ export class OmniSeed {
       results.push({ action, deployment, observation });
     }
     const next = await this.store.save({ ...state, deployed, observed, evidence, plans: state.plans.map(item => item.id === plan.id ? { ...item, status: "applied", appliedActionIds: [...allowed] } : item), history: [...state.history, { type: "plan_applied", planId: plan.id, actorId: authorization.actorId, at: new Date().toISOString(), actionIds: [...allowed] }] }, state.version);
-    await this.emitCompanyWorkFact(declaration.metadata.id, { type: "apply", planId: plan.id, planHash: plan.hash, appliedActionIds: [...allowed] });
+    await this.#emitCompanyWorkFactSafely(declaration.metadata.id, { type: "apply", planId: plan.id, planHash: plan.hash, appliedActionIds: [...allowed] });
     return { plan: { ...plan, status: "applied", appliedActionIds: [...allowed] }, state: next, registry: await this.inspect(active), results };
   }
   async reconcile(declaration, authorization) {
@@ -295,7 +295,7 @@ export class OmniSeed {
     }
     const at = new Date().toISOString(), observedRevision = state.binding?.desiredRevision ?? state.binding?.observedRevision ?? null;
     await this.store.save({ ...state, binding: { ...(state.binding ?? {}), observedRevision }, observed, history: [...state.history, { type: "reconciled", actorId: authorization.actorId, observedRevision, at }] }, state.version);
-    await this.emitCompanyWorkFact(declaration.metadata.id, { type: "observation", observedRevision });
+    await this.#emitCompanyWorkFactSafely(declaration.metadata.id, { type: "observation", observedRevision });
     return this.inspect(declaration);
   }
   async proposeCompanyChange(declaration, request, authorization) {
@@ -332,7 +332,7 @@ export class OmniSeed {
     const approval = { proposalId, proposalHash, actorId: authorization.actorId, permissions: [...authorization.permissions], approvedAt: new Date().toISOString() };
     const approved = { ...proposal, status: "approved", approval };
     await this.store.save({ ...state, companyChanges: replaceProposal(state, approved), history: [...state.history, { type: "company_change_approved", proposalId, proposalHash, actorId: authorization.actorId, at: approval.approvedAt }] }, state.version);
-    await this.emitCompanyWorkFact(declaration.metadata.id, { type: "company_approval", proposalId, proposalHash });
+    await this.#emitCompanyWorkFactSafely(declaration.metadata.id, { type: "company_approval", proposalId, proposalHash });
     return approval;
   }
   async rejectCompanyChange(declaration, proposalId, reason, authorization) {
@@ -374,7 +374,7 @@ export class OmniSeed {
     const mergedProposal = { ...proposal, status: "merged", merge };
     const recordedAt = new Date().toISOString(), mergeEvidence = createCompanyChangeMergeEvidence(state, proposal, merge, recordedAt);
     const next = await this.store.save({ ...state, companyChanges: replaceProposal(state, mergedProposal), evidence: [...state.evidence, mergeEvidence, ...(merge.evidence ?? [])], history: [...state.history, { type: "company_change_merged", proposalId, actorId: authorization.actorId, pullRequest: proposal.submission.pullRequest, mergeCommitSha: merge.mergeCommitSha, at: merge.mergedAt ?? recordedAt }] }, state.version);
-    await this.emitCompanyWorkFact(declaration.metadata.id, { type: "merge", proposalId, proposalHash: proposal.hash, headSha: proposal.submission.commit ?? proposal.submission.headSha ?? null, mergeCommitSha: merge.mergeCommitSha });
+    await this.#emitCompanyWorkFactSafely(declaration.metadata.id, { type: "merge", proposalId, proposalHash: proposal.hash, headSha: proposal.submission.commit ?? proposal.submission.headSha ?? null, mergeCommitSha: merge.mergeCommitSha });
     return { proposal: mergedProposal, state: next, merge };
   }
   async #markCompanyChangeStale(state, proposal, authorization, actualDefinitionHash) {
@@ -408,6 +408,10 @@ export class OmniSeed {
       catch (error) { if (!/Company work conflict/i.test(error.message) || attempt === 4) throw error; }
     }
     throw new EngineError("company_work_conflict", "Company work state could not be updated after concurrent writes.");
+  }
+  async #emitCompanyWorkFactSafely(companyId, fact) {
+    try { return await this.emitCompanyWorkFact(companyId, fact); }
+    catch { return []; }
   }
 }
 

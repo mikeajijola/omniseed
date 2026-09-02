@@ -131,6 +131,48 @@ test("exact governance facts create one restart-safe claimable continuation", as
   assert.equal(await restarted.claimCompanyWorkContinuation(declaration, { protocolId: "fake.agent/1", claimantId: "adapter-a" }, lily), null);
 });
 
+test("plan governance operations emit continuation events through their real operation paths", async () => {
+  const workStore = new MemoryCompanyWorkStore(), engine = new OmniSeed({ store: new MemoryStateStore(), workStore, providers: new ProviderRegistry() });
+  const operator = { actorId: "owner", permissions: ["plan.create", "plan.approve", "plan.apply", "state.reconcile"] };
+  const plan = await engine.plan(declaration, operator);
+  const waits = [
+    { status: "waiting_for_company_approval", awaited: { type: "company_approval", reference: { planId: plan.id, planHash: plan.hash } } },
+    { status: "waiting_for_apply", awaited: { type: "apply", reference: { planId: plan.id, planHash: plan.hash } } },
+    { status: "waiting_for_observation", awaited: { type: "observation", reference: {} } },
+  ];
+  for (const [index, wait] of waits.entries()) {
+    const run = await engine.startCompanyWork(declaration, { intent: `Wait for ${wait.awaited.type}` }, lily);
+    await engine.attachCompanyWorkSession(declaration, run.id, { protocolId: "fake.agent/1", runtimeSessionId: `session-${index}`, continuation: "private" }, lily);
+    await engine.recordCompanyWorkEvent(declaration, run.id, { ...wait, event: { id: `wait-${index}`, type: "governance_wait" } }, lily);
+  }
+
+  const approval = await engine.approve(plan, [], operator);
+  await engine.apply(declaration, plan, approval, operator);
+  await engine.reconcile(declaration, operator);
+
+  assert.deepEqual((await workStore.load("acme")).continuationEvents.map(event => event.fact.type).sort(), ["apply", "company_approval", "observation"]);
+});
+
+test("auxiliary continuation write failures do not report committed governance work as failed", async () => {
+  const primary = new MemoryStateStore();
+  const failingWorkStore = {
+    state: new MemoryCompanyWorkStore(),
+    async load(companyId) { return this.state.load(companyId); },
+    async save() { throw new Error("company work storage unavailable"); },
+  };
+  const engine = new OmniSeed({ store: primary, workStore: failingWorkStore, providers: new ProviderRegistry() });
+  const operator = { actorId: "owner", permissions: ["plan.create", "plan.approve", "plan.apply", "state.reconcile"] };
+  const plan = await engine.plan(declaration, operator);
+  const approval = await engine.approve(plan, [], operator);
+  assert.equal((await primary.load("acme")).plans.find(item => item.id === plan.id).status, "approved");
+
+  const applied = await engine.apply(declaration, plan, approval, operator);
+  assert.equal(applied.plan.status, "applied");
+  assert.equal((await primary.load("acme")).plans.find(item => item.id === plan.id).status, "applied");
+  await engine.reconcile(declaration, operator);
+  assert.equal((await primary.load("acme")).history.at(-1).type, "reconciled");
+});
+
 test("cancelled work cannot claim a delayed continuation", async () => {
   const engine = new OmniSeed({ store: new MemoryStateStore(), providers: new ProviderRegistry() });
   const run = await engine.startCompanyWork(declaration, { intent: "Wait" }, lily);
