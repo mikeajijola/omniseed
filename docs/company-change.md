@@ -11,7 +11,7 @@ These are separate governed mutations. Applying a Company Change Proposal update
 OmniSeed persists Company Change Proposals separately from realisation plans. A Generation 1 proposal contains:
 
 - stable `id`, `companyId`, lifecycle `status`, creation time, and proposer actor identity;
-- `baseDefinitionHash`, the inspected merged `baseDesiredRevision` when known, and the previewed `proposedDefinitionHash`;
+- `baseDefinitionHash`, the inspected merged `baseDesiredRevision` (required for Git-governed companies), and the previewed `proposedDefinitionHash`;
 - an exact proposal `hash` used by approval;
 - rationale in `reason`, separate resolvable `evidence` references, assumptions, alternatives, and risks;
 - inspectable target paths and a deterministic `patch`;
@@ -36,7 +36,7 @@ The engine uses the existing actor permission mechanism:
 - `company_change.reject`
 - `company_change.apply`
 
-Approval binds the exact persisted proposal hash. Before approval and apply, OmniSeed compares the active definition hash with `baseDefinitionHash` and, when recorded, the runtime's merged desired revision with `baseDesiredRevision`; mismatch records `stale` and returns `company_change_stale`. It never rebases or regenerates a proposal during apply. Approval and apply are separate authorities and need not belong to the proposer.
+Approval binds the exact persisted proposal hash. Before approval and apply, OmniSeed compares the active definition hash with `baseDefinitionHash` and the merged desired revision with `baseDesiredRevision` when present; mismatch records `stale` and returns `company_change_stale`. It never rebases or regenerates a proposal during apply. Approval and apply are separate authorities and need not belong to the proposer.
 
 `requiredAuthority` is enforceable Generation 1 policy expressed through the existing permission model: `{ approve: string[], apply: string[] }`. OmniSeed always includes the baseline `company_change.approve` and `company_change.apply` permissions and deterministically enforces any additional proposal-specific permissions at the corresponding lifecycle transition. Merging a submitted Git-backed change additionally requires `company_change.merge`.
 
@@ -44,7 +44,7 @@ Authorisation is evaluated against the currently active company and permissions.
 
 ## Public engine API and operations
 
-The public inspection projection includes the exact parsed `definition`, its `definitionHash`, and the merged `instance.desiredRevision`. A caller can bind those inspection facts into `baseDefinitionHash` and `baseDesiredRevision` when proposing; stale input is rejected before persistence.
+The public inspection projection includes the exact parsed `definition`, its `definitionHash`, and the merged `instance.desiredRevision`. A caller can bind those inspection facts into `baseDefinitionHash` and `baseDesiredRevision` when proposing; stale input is rejected before persistence. For Git-governed companies, proposal creation also inspects the canonical repository and always binds its reported merged revision, even when no runtime binding was separately recorded.
 
 The public engine exposes `proposeCompanyChange`, `listCompanyChangeProposals`, `getCompanyChangeProposal`, `previewCompanyChange`, `approveCompanyChange`, `rejectCompanyChange`, `applyCompanyChange`, and `mergeCompanyChange`.
 
