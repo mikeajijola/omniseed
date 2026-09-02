@@ -150,7 +150,17 @@ test("invalid low-level fact shapes fail before any durable work mutation", asyn
   const originalSave = workStore.save.bind(workStore);
   workStore.save = async (...args) => { saves += 1; return originalSave(...args); };
   const before = await workStore.load("acme");
-  assert.throws(() => continuationEventFor({ await: { type: "apply", reference: {} } }, { type: "apply", planId: "plan", planHash: "not-a-digest", appliedActionIds: [] }), error => error.code === "company_work_fact_invalid");
+  const run = { await: { type: "apply", reference: {} } };
+  for (const fact of [
+    null,
+    { type: "company_approval", planId: "plan", proposalId: "proposal" },
+    { type: "apply", planId: "plan", planHash: "not-a-digest", appliedActionIds: [] },
+    { type: "observation", observedRevision: 7 },
+    { type: "desired_revision", desiredRevision: {} },
+    { type: "merge", proposalId: "proposal", proposalHash: "a".repeat(64), headSha: "head" },
+    { type: "checks", proposalId: "proposal", proposalHash: "a".repeat(64), checks: [{}] },
+    { type: "invented_governance_fact" },
+  ]) assert.throws(() => continuationEventFor(run, fact), error => error.code === "company_work_fact_invalid");
   assert.deepEqual(await workStore.load("acme"), before);
   assert.equal(saves, 0);
 });
