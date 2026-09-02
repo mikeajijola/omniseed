@@ -117,6 +117,46 @@ test("approval binds the persisted proposal hash and rejection prevents apply", 
   await assert.rejects(rejectedSubject.applyCompanyChange(declaration, rejected.id, actors.human), error => error.code === "company_change_invalid_state");
 });
 
+test("matching desired revision remains valid through approval and apply", async () => {
+  const desiredRevision = "a".repeat(40);
+  const store = new MemoryStateStore({ ...stateWithEvidence(), binding: { desiredRevision, observedRevision: desiredRevision } });
+  const subject = new OmniSeed({ store, providers: new ProviderRegistry() });
+  const proposal = await subject.proposeCompanyChange(declaration, request(), actors.lily);
+
+  const approval = await subject.approveCompanyChange(declaration, proposal.id, proposal.hash, actors.human);
+  const applied = await subject.applyCompanyChange(declaration, proposal.id, actors.human);
+
+  assert.equal(proposal.baseDesiredRevision, desiredRevision);
+  assert.equal(approval.proposalHash, proposal.hash);
+  assert.equal(applied.proposal.status, "applied");
+  assert.equal(applied.state.binding.desiredRevision, desiredRevision);
+});
+
+test("desired revision drift before approval marks the proposal stale", async () => {
+  const inspectedRevision = "a".repeat(40), currentRevision = "b".repeat(40);
+  const store = new MemoryStateStore({ ...stateWithEvidence(), binding: { desiredRevision: inspectedRevision, observedRevision: inspectedRevision } });
+  const subject = new OmniSeed({ store, providers: new ProviderRegistry() });
+  const proposal = await subject.proposeCompanyChange(declaration, request(), actors.lily);
+  const state = await store.load("acme");
+  await store.save({ ...state, binding: { ...state.binding, desiredRevision: currentRevision } }, state.version);
+
+  await assert.rejects(subject.approveCompanyChange(declaration, proposal.id, proposal.hash, actors.human), error => error.code === "company_change_stale" && error.details.expected === inspectedRevision && error.details.actual === currentRevision);
+  assert.equal((await subject.getCompanyChangeProposal(declaration, proposal.id, { actorId: "reader", permissions: ["company_change.read"] })).status, "stale");
+});
+
+test("desired revision drift after approval marks the proposal stale before apply", async () => {
+  const inspectedRevision = "a".repeat(40), currentRevision = "b".repeat(40);
+  const store = new MemoryStateStore({ ...stateWithEvidence(), binding: { desiredRevision: inspectedRevision, observedRevision: inspectedRevision } });
+  const subject = new OmniSeed({ store, providers: new ProviderRegistry() });
+  const proposal = await subject.proposeCompanyChange(declaration, request(), actors.lily);
+  await subject.approveCompanyChange(declaration, proposal.id, proposal.hash, actors.human);
+  const state = await store.load("acme");
+  await store.save({ ...state, binding: { ...state.binding, desiredRevision: currentRevision } }, state.version);
+
+  await assert.rejects(subject.applyCompanyChange(declaration, proposal.id, actors.human), error => error.code === "company_change_stale" && error.details.expected === inspectedRevision && error.details.actual === currentRevision);
+  assert.equal((await subject.getCompanyChangeProposal(declaration, proposal.id, { actorId: "reader", permissions: ["company_change.read"] })).status, "stale");
+});
+
 test("proposal-specific required authority is hashed and enforced for approval and apply", async () => {
   const subject = engine(stateWithEvidence());
   const proposal = await subject.proposeCompanyChange(declaration, { ...request(), requiredAuthority: { approve: ["board.approve"], apply: ["release.apply"] } }, actors.lily);
