@@ -7,7 +7,7 @@ import { assertStewardshipPolicySafe } from "./stewardship.js";
 const supportedOperations = new Set(["add", "remove", "replace"]);
 const forbiddenSegments = new Set(["__proto__", "prototype", "constructor"]);
 
-export function createCompanyChangeProposal({ declaration, request, actor, evidence, createdAt = new Date().toISOString() }) {
+export function createCompanyChangeProposal({ declaration, request, actor, evidence, baseDesiredRevision = null, createdAt = new Date().toISOString() }) {
   const patch = normalizePatch(request.patch);
   const candidate = applyDefinitionPatch(declaration, patch);
   const baseDefinitionHash = definitionHash(declaration);
@@ -19,6 +19,7 @@ export function createCompanyChangeProposal({ declaration, request, actor, evide
     proposedBy: { actorId: actor.actorId, ...(actor.actorType ? { actorType: actor.actorType } : {}) },
     createdAt,
     baseDefinitionHash,
+    ...(baseDesiredRevision ? { baseDesiredRevision } : {}),
     proposedDefinitionHash,
     reason: requiredText(request.reason, "reason"),
     evidence: evidenceReferences,
@@ -139,8 +140,8 @@ function normalizeRequiredAuthority(authority) {
 }
 
 function proposalImmutable(proposal) {
-  const keys = ["companyId", "proposedBy", "createdAt", "baseDefinitionHash", "proposedDefinitionHash", "reason", "evidence", "targets", "patch", "alternatives", "assumptions", "risks", "requiredAuthority"];
-  return canonicalize(Object.fromEntries(keys.map(key => [key, proposal?.[key]])));
+  const keys = ["companyId", "proposedBy", "createdAt", "baseDefinitionHash", "baseDesiredRevision", "proposedDefinitionHash", "reason", "evidence", "targets", "patch", "alternatives", "assumptions", "risks", "requiredAuthority"];
+  return canonicalize(Object.fromEntries(keys.filter(key => key !== "baseDesiredRevision" || proposal?.[key] !== undefined).map(key => [key, proposal?.[key]])));
 }
 
 function summarizeTargets(patch) {

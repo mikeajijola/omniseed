@@ -30,6 +30,7 @@ export class ProviderGitCompanyRepository extends CompanyRepository {
     validateAuthority(authority);
     const repository = repositoryName(authority.repository);
     const repositoryState = await this.inspect({ authority });
+    if (!proposal.baseDesiredRevision || repositoryState.baseSha !== proposal.baseDesiredRevision) throw new EngineError("company_change_stale", "Canonical Git revision changed after the Company Change was proposed", { expected: proposal.baseDesiredRevision ?? null, actual: repositoryState.baseSha ?? null });
     const branch = `omniseed/${proposal.id}`;
     const action = {
       id: `company_change_${proposal.id}`,
@@ -242,9 +243,11 @@ function makeCollectionsFlow(node) {
 
 /** Deterministic test/reference adapter. It records a PR-shaped submission and never merges it. */
 export class InMemoryGitCompanyRepository extends CompanyRepository {
-  constructor() { super(); this.submissions = []; }
+  constructor({ baseSha = "a".repeat(40) } = {}) { super(); this.baseSha = baseSha; this.submissions = []; }
+  async inspect() { return { baseSha: this.baseSha }; }
   async submit({ authority, proposal }) {
     if (authority.changeMode !== "pull_request") throw new EngineError("company_repository_invalid", "Canonical company changes must use pull requests");
+    if (!proposal.baseDesiredRevision || proposal.baseDesiredRevision !== this.baseSha) throw new EngineError("company_change_stale", "Canonical Git revision changed after the Company Change was proposed", { expected: proposal.baseDesiredRevision ?? null, actual: this.baseSha });
     const branch = `omniseed/${proposal.id}`;
     const submission = {
       repository: authority.repository, baseBranch: authority.branch, path: authority.path, branch,
