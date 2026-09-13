@@ -1,0 +1,41 @@
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const root = fileURLToPath(new URL('../', import.meta.url));
+const workspace = mkdtempSync(join(tmpdir(), 'engine-consumer-'));
+const npm = (args, cwd = workspace) => execFileSync('npm', args, { cwd, encoding: 'utf8' });
+try {
+  const pkg = JSON.parse(readFileSync(join(root, 'package.json')));
+  const published = process.argv[2] === '--published';
+  const artifact = published ? `${pkg.name}@${pkg.version}` : join(workspace, JSON.parse(npm(['pack', '--json', '--pack-destination', workspace], root))[0].filename);
+  writeFileSync(join(workspace, 'package.json'), '{"private":true,"type":"module"}');
+  npm(['install', '--ignore-scripts', '--no-audit', '--no-fund', '--cache', join(workspace, 'cache'), '--registry', 'https://registry.npmjs.org', artifact]);
+  writeFileSync(join(workspace, 'declaration.yaml'), readFileSync(join(root, 'test/fixtures/stewardship.omniform.yaml')));
+  writeFileSync(join(workspace, 'verify.mjs'), `
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { parseOmniform, assertOmniform } from '@omniseed/omniform';
+import { compileStewardshipProfile, evaluateStewardshipProposal, assertStewardshipPolicySafe } from '@omniseed/engine';
+const engine = JSON.parse(fs.readFileSync('node_modules/@omniseed/engine/package.json'));
+const form = JSON.parse(fs.readFileSync('node_modules/@omniseed/omniform/package.json'));
+assert.equal(engine.version, ${JSON.stringify(pkg.version)});
+assert.equal(form.version, '1.0.0-alpha.7');
+assert.equal(engine.dependencies['@omniseed/omniform'], form.version);
+const declaration = parseOmniform(fs.readFileSync('declaration.yaml', 'utf8'));
+assertOmniform(declaration);
+assertStewardshipPolicySafe(declaration);
+const now = new Date('2026-09-01T12:00:00Z');
+const profile = compileStewardshipProfile(declaration, {stewardshipControl:{state:'enabled'}}, now);
+assert.equal(profile.declaredMode, 'autonomous_safe');
+assert.equal(profile.state, 'enabled');
+const proposal = { id:'test', digest:'a'.repeat(64), headSha:'b'.repeat(40), proposerActorId:'steward' };
+const context = {actorId:'steward',now,checks:[{status:'successful'}],approval:{actorId:'reviewer',proposalId:proposal.id,proposalDigest:proposal.digest,headSha:proposal.headSha}};
+assert.equal(evaluateStewardshipProposal(profile,proposal,context).allowed,true);
+assert.equal(evaluateStewardshipProposal(profile,proposal,{...context,approval:undefined}).allowed,false);
+assert.equal(evaluateStewardshipProposal(profile,proposal,{...context,approval:{...context.approval,headSha:'c'.repeat(40)}}).allowed,false);
+console.log(JSON.stringify({engine:engine.version,omniform:form.version,consumer:${JSON.stringify(published ? 'published-registry' : 'packed')},allowed:'PASS',missingReview:'REJECTED',changedHead:'REJECTED'}));
+`);
+  process.stdout.write(execFileSync('node', ['verify.mjs'], { cwd: workspace, encoding: 'utf8' }));
+} finally { rmSync(workspace, { recursive: true, force: true }); }
