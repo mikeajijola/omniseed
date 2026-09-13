@@ -1,6 +1,6 @@
 {
   "name": "@omniseed/engine",
-  "version": "1.0.0-alpha.20",
+  "version": "1.0.0-alpha.21",
   "description": "Headless compiler, planner, provisioner and reconciler for Company-as-Code.",
   "license": "Apache-2.0",
   "repository": {
@@ -20,10 +20,11 @@
   },
   "scripts": {
     "test": "node --test",
-    "check": "npm test"
+    "check": "npm test",
+    "test:consumer": "node scripts/verify-package-consumer.mjs"
   },
   "dependencies": {
-    "@omniseed/omniform": "1.0.0-alpha.6",
+    "@omniseed/omniform": "1.0.0-alpha.7",
     "yaml": "^2.8.1"
   },
   "engines": {
