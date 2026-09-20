@@ -136,6 +136,42 @@ test("approval, evaluation and completion retries are idempotent with exact-once
   assert.equal(state.stewardshipApprovals.length, 1); assert.equal(state.stewardshipEvaluations.length, 1);
 });
 
+test("evaluation retries recheck current control and lease without consuming another slot", async () => {
+  for (const [name, mutate, expectedCode] of [
+    ["paused", s => { s.stewardshipControl.state = "paused"; }, "stewardship_paused"],
+    ["disabled", s => { s.stewardshipControl.state = "disabled"; }, "stewardship_disabled"],
+    ["expired control", s => { s.stewardshipControl.expiresAt = "2000-01-01T00:00:00Z"; }, "stewardship_expired"],
+    ["expired lease", s => { s.stewardshipEvaluations[0].lease.expiresAt = "2000-01-01T00:00:00Z"; }, "stewardship_lease_expired"],
+    ["invalid lease", s => { s.stewardshipEvaluations[0].lease.expiresAt = "invalid"; }, "stewardship_lease_expired"],
+    ["released lease", s => { s.stewardshipEvaluations[0].lease.status = "cancelled"; s.stewardshipUsage.active = 0; }, "stewardship_lease_inactive"],
+    ["removed review", s => { s.stewardshipApprovals = []; }, "stewardship_independent_review_required"],
+  ]) {
+    const f = fixture(), engine = new OmniSeed({ store: f.store, providers: new ProviderRegistry() });
+    const input = { proposalId: f.proposal.id, observationId: f.observation.id };
+    await engine.recordStewardshipApproval(f.company, { ...input, outcome: "approved" }, reviewer);
+    assert.equal((await engine.evaluateStewardship(f.company, input, steward)).allowed, true);
+    const state = await f.store.load("acme");
+    mutate(state);
+    await f.store.save(state, state.version);
+    const before = await f.store.load("acme");
+    const decision = await engine.evaluateStewardship(f.company, input, steward);
+    assert.equal(decision.allowed, false, name);
+    assert.equal(decision.code, expectedCode, name);
+    assert.deepEqual(await f.store.load("acme"), before, `${name}: historical evidence and budgets remain unchanged`);
+  }
+});
+
+test("an active evaluation retry does not double-count its reserved concurrency or budget", async () => {
+  const f = fixture({ policy: { ...autonomy, limits: { concurrency: 1, dailyChanges: 1, repairRounds: 1, actions: 1 } } });
+  const engine = new OmniSeed({ store: f.store, providers: new ProviderRegistry() });
+  const input = { proposalId: f.proposal.id, observationId: f.observation.id };
+  await engine.recordStewardshipApproval(f.company, { ...input, outcome: "approved" }, reviewer);
+  assert.equal((await engine.evaluateStewardship(f.company, input, steward)).allowed, true);
+  const before = await f.store.load("acme");
+  assert.equal((await engine.evaluateStewardship(f.company, input, steward)).allowed, true);
+  assert.deepEqual(await f.store.load("acme"), before);
+});
+
 test("completed stewardship requires a persisted merge and Engine-recorded merge evidence", async () => {
   const f = fixture(), engine = new OmniSeed({ store: f.store, providers: new ProviderRegistry(), companyRepository: mergeRepository() });
   await engine.recordStewardshipApproval(f.company, { proposalId: f.proposal.id, observationId: f.observation.id, outcome: "approved" }, reviewer);
