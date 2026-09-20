@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { associateCompanyWork, attachCompanyWorkSession, COMPANY_WORK_TERMINAL_STATES, continuationEventFor, createCompanyWorkRun, markCompanyWorkMutating, projectCompanyWorkRun, projectContinuationEvent, recordCompanyWorkEvent, runtimeCompanyWorkRun, transitionCompanyWorkRun } from "./company-work.js";
 import { MemoryCompanyWorkStore } from "./company-work-store.js";
 import { compareCompanySnapshot, createCompanySnapshot } from "./company-snapshot.js";
-import { attestStewardshipApproval, compileStewardshipProfile, evaluateStewardshipProposal } from "./stewardship.js";
+import { attestStewardshipApproval, compileStewardshipProfile, evaluateStewardshipProposal, stewardshipReason } from "./stewardship.js";
 
 export class OmniSeed {
   constructor({ store, workStore = new MemoryCompanyWorkStore(), providers, resolver = new CapabilityResolver(), operations = defaultOperations(), companyRepository = null, binding = {} }) { this.store = store; this.workStore = workStore; this.providers = providers; this.resolver = resolver; this.operations = operations; this.companyRepository = companyRepository; this.binding = binding; }
@@ -80,8 +80,27 @@ export class OmniSeed {
     const persisted = verifiedStewardshipProposal(state, input.proposalId, active), observation = verifiedStewardshipObservation(state, input.observationId, persisted);
     const proposal = deriveStewardshipFacts(persisted, observation);
     const existing = (state.stewardshipEvaluations ?? []).find(item => item.proposalId === proposal.id && item.proposalDigest === proposal.digest && item.headSha === proposal.headSha && item.observationId === observation.id && item.actorId === authorization.actorId);
-    if (existing) return structuredClone(existing.decision);
     const approval = [...(state.stewardshipApprovals ?? [])].reverse().find(item => item.proposalId === proposal.id && item.proposalDigest === proposal.digest && item.headSha === proposal.headSha);
+    if (existing) {
+      // Historical permission is not current authority. Recheck controls/review
+      // without charging this already reserved proposal a second time.
+      const retryProfile = structuredClone(profile);
+      if (retryProfile) {
+        const sameDay = existing.at?.slice(0, 10) === retryProfile.usage.day;
+        retryProfile.usage.active = Math.max(0, retryProfile.usage.active - (existing.lease?.status === "active" ? 1 : 0));
+        if (sameDay) {
+          retryProfile.usage.dailyChanges = Math.max(0, retryProfile.usage.dailyChanges - 1);
+          retryProfile.usage.actions = Math.max(0, retryProfile.usage.actions - existing.actionCount);
+          retryProfile.usage.repairRounds = Math.max(0, retryProfile.usage.repairRounds - existing.repairRoundCount);
+        }
+      }
+      const decision = evaluateStewardshipProposal(retryProfile, proposal, { actorId: authorization.actorId, approval, checks: observation.checks });
+      if (!decision.allowed) return decision;
+      if (existing.lease?.status !== "active") return stewardshipReason("stewardship_lease_inactive", "This historical evaluation no longer has an active lease.");
+      const expiry = Date.parse(existing.lease.expiresAt ?? "");
+      if (!Number.isFinite(expiry) || expiry <= Date.now()) return stewardshipReason("stewardship_lease_expired", "The exact-head stewardship lease has expired; explicit recovery is required.");
+      return decision;
+    }
     const decision = evaluateStewardshipProposal(profile, proposal, { actorId: authorization.actorId, approval, checks: observation.checks });
     if (!decision.allowed) return decision;
     const at = new Date().toISOString(), actionCount = proposal.actionCount, repairRoundCount = proposal.repairRoundCount;
